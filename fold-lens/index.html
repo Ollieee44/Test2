@@ -186,6 +186,7 @@ a{color:var(--accent)}
       <div class="pane" id="p-struct" role="tabpanel">
         <section class="sec"><h3>Loaded models</h3><div class="models" id="models"></div>
           <div class="row" id="samples"><span class="note">Samples:</span>
+            <button class="btn small" data-sample="7JXY.cif">7JXY · TTBK1 + inhibitor</button>
             <button class="btn small" data-sample="4CUP.cif">4CUP · bromodomain + fragment</button>
             <button class="btn small" data-sample="7DDO.pdb">7DDO · ACE2–RBD</button>
             <button class="btn small" data-sample="1LCD.pdb">1LCD · repressor–DNA</button>
@@ -1727,7 +1728,7 @@ addEventListener('paste',e=>{ if(e.target.closest('input,textarea')) return; con
   try{ const t=localStorage.getItem('foldlens-tab'); if(t&&document.getElementById(t)) openTab(t); }catch(e){}
   refreshAll(); renderEntities();
   if(!initViewer()) return;
-  await loadSample('4CUP.cif');
+  await loadSample('7JXY.cif');
   if(window.claude && typeof window.claude.use==='function'){
     claude.use('sample').then(s=>{ if(s){ S.sample=s; $('#modeClaude').disabled=false; $('#modeClaude').title='Ask Claude to interpret and answer (uses your Claude usage)'; } }).catch(()=>{});
     claude.use('downloads').then(d=>{ if(d) S.downloads=d; }).catch(()=>{});
