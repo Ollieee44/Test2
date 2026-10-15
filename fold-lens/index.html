@@ -1,0 +1,1736 @@
+<title>Fold Lens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen instrument. Stage (3D) on the left with a command console docked under it; tabbed inspector on the right. Stacks on phones. */
+:root{
+  --bg:#e9edf1; --panel:#ffffff; --panel-2:#f4f6f9; --ink:#15202b; --muted:#5a6878; --line:#d5dce4;
+  --accent:#a3127f; --accent-ink:#ffffff; --accent-soft:#f6e3f1; --stage:#fbfcfd;
+  --ok:#1f7a4d; --warn:#a15c00; --bad:#b4232c;
+  --pl-vh:#0053d6; --pl-h:#65cbf3; --pl-l:#ffdb13; --pl-vl:#ff7d45;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d1217; --panel:#151c24; --panel-2:#1b242e; --ink:#e4ebf2; --muted:#8d9cad; --line:#283442;
+  --accent:#f062c8; --accent-ink:#1a0614; --accent-soft:#3a1631; --stage:#090d12;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d1217; --panel:#151c24; --panel-2:#1b242e; --ink:#e4ebf2; --muted:#8d9cad; --line:#283442;
+  --accent:#f062c8; --accent-ink:#1a0614; --accent-soft:#3a1631; --stage:#090d12;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178; color-scheme:dark}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:grid;grid-template-rows:auto 1fr;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));padding-block:10px;gap:10px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto;min-width:0}
+.brand h1{font:700 22px/1 var(--f-display);letter-spacing:-.01em;margin:0}
+.brand span{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 11px;font-weight:500;font-size:13px;line-height:1.2;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:3px 8px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+.fetch{display:flex;gap:6px}
+.fetch input{width:150px;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 9px;font:13px var(--f-mono)}
+main{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:10px;min-height:0}
+.left{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;min-height:0;min-width:0}
+.stage{position:relative;background:var(--stage);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;min-height:0}
+#viewer{position:absolute;inset:0}
+.readout{position:absolute;left:10px;top:10px;font:12px var(--f-mono);background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);border-radius:6px;padding:4px 8px;pointer-events:none;max-width:calc(100% - 20px)}
+.legend{position:absolute;right:10px;bottom:10px;font-size:11.5px;background:color-mix(in srgb,var(--panel) 90%,transparent);border:1px solid var(--line);border-radius:6px;padding:6px 8px;display:grid;gap:3px;pointer-events:none}
+.legend b{font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:20px}
+.drop{position:fixed;inset:0;background:color-mix(in srgb,var(--accent) 18%,transparent);border:3px dashed var(--accent);display:grid;place-items:center;font:600 20px var(--f-display);z-index:50;pointer-events:none}
+/* console */
+.console{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);display:grid;grid-template-rows:auto auto auto;min-width:0}
+.log{max-height:150px;overflow-y:auto;padding:8px 12px 4px;display:grid;gap:4px;font-size:13px}
+.log:empty{display:none}
+.msg{display:grid;grid-template-columns:62px 1fr;gap:8px;align-items:baseline}
+.msg .who{font:500 10.5px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.msg.you .txt{font-weight:500}
+.msg.err .txt{color:var(--bad)}
+.msg.claude .who{color:var(--accent)}
+.msg .txt{white-space:pre-wrap;min-width:0;overflow-wrap:anywhere}
+.cmdrow{display:flex;gap:8px;padding:8px 10px;border-top:1px solid var(--line);align-items:center}
+.log:empty + .cmdrow{border-top:0}
+.cmdrow input{flex:1;min-width:0;border:1px solid var(--line);border-radius:6px;padding:9px 11px;background:var(--panel-2);font-size:14px}
+.mode{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.mode button{border:0;background:transparent;padding:7px 9px;font-size:12px;font-weight:500;color:var(--muted)}
+.mode button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink)}
+.mode button:disabled{opacity:.45;cursor:default}
+.chips{display:flex;gap:6px;padding:0 10px 9px;overflow-x:auto;scrollbar-width:thin}
+.chip{flex:none;border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted)}
+.chip:hover{color:var(--ink);border-color:var(--muted)}
+/* inspector */
+aside{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;min-width:0}
+.tabs{display:flex;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs button{border:0;background:transparent;padding:10px 12px;font-weight:500;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.pane{overflow-y:auto;padding:12px 14px 16px;display:grid;gap:16px;align-content:start;min-width:0}
+.sec{display:grid;gap:8px;min-width:0}
+.sec h3{margin:0;font:600 11px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sec p{margin:0;color:var(--muted);font-size:12.5px}
+.models{display:grid;gap:6px}
+.mcard{border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center;background:var(--panel)}
+.mcard.active{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.mcard .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.mcard .sub{grid-column:2/4;font-size:12px;color:var(--muted)}
+.mcard .acts{display:flex;gap:4px}
+.badge{display:inline-block;font:500 10.5px/1 var(--f-mono);padding:3px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);vertical-align:1px}
+.badge.pred{border-color:var(--pl-vh);color:var(--pl-vh)}
+.idx{font:600 11px var(--f-mono);color:var(--muted)}
+.ligs{display:flex;flex-wrap:wrap;gap:6px}
+.kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;font-variant-numeric:tabular-nums;font-family:var(--f-mono);font-size:12.5px}
+.seq{font:12px/1.9 var(--f-mono);display:grid;gap:10px}
+.seq .ch{display:grid;gap:2px}
+.seq .ch b{font:600 11.5px var(--f-body);color:var(--muted)}
+.seq .rs{display:flex;flex-wrap:wrap}
+.seq .r{width:1.15em;text-align:center;cursor:pointer;border-radius:2px;position:relative}
+.seq .r:hover{outline:1px solid var(--ink)}
+.seq .r.tick::before{content:attr(data-n);position:absolute;top:-1.15em;left:0;font-size:8.5px;color:var(--muted);line-height:1}
+.seq .r.tick{margin-top:.6em}
+.bands{display:flex;height:12px;border-radius:3px;overflow:hidden;border:1px solid var(--line)}
+.bandkey{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 10px;font-size:12px}
+.bandkey i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.paebox{position:relative;width:100%;max-width:360px;aspect-ratio:1;border:1px solid var(--line)}
+.paebox canvas{width:100%;height:100%;display:block;image-rendering:pixelated;cursor:crosshair}
+.paebox .selrect{position:absolute;border:1.5px solid var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none}
+.paescale{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+.paescale span.g{flex:1;height:8px;border-radius:2px;background:linear-gradient(90deg,#0f5c2e,#5fae6e,#e6f2e8)}
+table.mini{border-collapse:collapse;font:12px var(--f-mono)}
+table.mini td,table.mini th{border:1px solid var(--line);padding:3px 6px;text-align:center}
+table.mini th{font-weight:500;color:var(--muted)}
+.scroll-x{overflow-x:auto}
+.ent{border:1px solid var(--line);border-radius:6px;padding:8px;display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center}
+.ent .s{grid-column:1/4;font:11.5px/1.4 var(--f-mono);color:var(--muted);overflow-wrap:anywhere;max-height:3.2em;overflow:hidden}
+.ent input[type=number]{width:52px;border:1px solid var(--line);border-radius:4px;padding:2px 4px;background:var(--panel-2)}
+.ent input[type=text]{grid-column:1/4;border:1px solid var(--line);border-radius:4px;padding:3px 6px;font:12px var(--f-mono);background:var(--panel-2)}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+select,textarea,.field{border:1px solid var(--line);border-radius:6px;background:var(--panel-2);padding:6px 8px}
+textarea{width:100%;font:12px/1.45 var(--f-mono);resize:vertical}
+.note{font-size:12px;color:var(--muted)}
+.warn{font-size:12px;color:var(--warn)}
+.help dl{margin:0;display:grid;gap:8px}
+.help dt{font:500 12.5px var(--f-mono);color:var(--ink)}
+.help dd{margin:0 0 0 0;color:var(--muted);font-size:12.5px}
+details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+a{color:var(--accent)}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px;z-index:60}
+@media (max-width:900px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%}
+  main{grid-template-columns:minmax(0,1fr)}
+  .left{grid-template-rows:62vh auto}
+  aside{min-height:70vh}
+  .fetch input{width:120px}
+}
+@media (max-width:600px){
+  .brand h1{white-space:nowrap}
+  .brand span{display:none}
+  .cmdrow{flex-wrap:wrap}
+  .cmdrow input{flex-basis:100%}
+  .cmdrow .btn{margin-left:auto}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand"><h1>Fold Lens</h1><span id="subtitle">Structures, predictions and co-folds, inspected in plain language</span></div>
+    <div class="fetch">
+      <input id="fetchId" placeholder="PDB or UniProt ID" aria-label="PDB or UniProt ID" spellcheck="false">
+      <button class="btn" id="fetchBtn">Fetch</button>
+    </div>
+    <button class="btn primary" id="openBtn">Open files…</button>
+    <input type="file" id="fileIn" multiple hidden accept=".pdb,.ent,.cif,.mmcif,.bcif,.pqr,.sdf,.mol2,.xyz,.json,.npz,.zip,.gz">
+  </header>
+  <main>
+    <div class="left">
+      <div class="stage" id="stage">
+        <div id="viewer"></div>
+        <div class="empty" id="emptyMsg">Loading the 3D viewer…</div>
+        <div class="readout" id="readout" hidden></div>
+        <div class="legend" id="legend" hidden></div>
+      </div>
+      <div class="console">
+        <div class="log" id="log" aria-live="polite"></div>
+        <form class="cmdrow" id="cmdForm" autocomplete="off">
+          <input id="cmd" placeholder="Try: show the binding site of ZYB and label it" aria-label="Command">
+          <div class="mode" role="group" aria-label="Who interprets the command">
+            <button type="button" id="modeLocal" aria-pressed="true" title="Instant, offline parser">Built-in</button>
+            <button type="button" id="modeClaude" aria-pressed="false" title="Ask Claude to interpret and answer" disabled>Claude</button>
+          </div>
+          <button class="btn primary" id="runBtn">Run</button>
+        </form>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+    <aside>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="t-struct" aria-selected="true" data-pane="p-struct">Structure</button>
+        <button role="tab" id="t-conf" aria-selected="false" data-pane="p-conf">Confidence</button>
+        <button role="tab" id="t-fold" aria-selected="false" data-pane="p-fold">Co-fold</button>
+        <button role="tab" id="t-help" aria-selected="false" data-pane="p-help">Commands</button>
+      </div>
+      <div class="pane" id="p-struct" role="tabpanel">
+        <section class="sec"><h3>Loaded models</h3><div class="models" id="models"></div>
+          <div class="row" id="samples"><span class="note">Samples:</span>
+            <button class="btn small" data-sample="4CUP.cif">4CUP · bromodomain + fragment</button>
+            <button class="btn small" data-sample="7DDO.pdb">7DDO · ACE2–RBD</button>
+            <button class="btn small" data-sample="1LCD.pdb">1LCD · repressor–DNA</button>
+          </div>
+        </section>
+        <section class="sec" id="infoSec"></section>
+        <section class="sec"><h3>Ligands &amp; ions</h3><div class="ligs" id="ligs"><span class="note">None in this model.</span></div></section>
+        <section class="sec"><h3>Sequence</h3><p>Click a residue to focus it. Shaded by pLDDT on predicted models.</p><div class="seq" id="seq"></div></section>
+        <section class="sec"><details><summary>Paste coordinates instead</summary>
+          <div style="display:grid;gap:6px;margin-top:8px"><textarea id="pasteTxt" rows="5" placeholder="Paste PDB or mmCIF text"></textarea><div class="row"><button class="btn small" id="pasteBtn">Load pasted text</button></div></div></details></section>
+      </div>
+      <div class="pane" id="p-conf" role="tabpanel" hidden></div>
+      <div class="pane" id="p-fold" role="tabpanel" hidden>
+        <section class="sec"><h3>Build a co-folding job</h3>
+          <p>Entities come from the active model. Edit counts, add sequences or ligands, then export the input for the predictor you use.</p>
+          <div id="ents" style="display:grid;gap:6px"></div>
+          <div class="row">
+            <select id="addType" aria-label="Entity type"><option value="protein">Protein</option><option value="dna">DNA</option><option value="rna">RNA</option><option value="ligand">Ligand (CCD code)</option><option value="smiles">Ligand (SMILES)</option><option value="ion">Ion</option></select>
+            <button class="btn small" id="addEntBtn">Add</button>
+          </div>
+          <textarea id="addSeq" rows="2" placeholder="Sequence, FASTA, CCD code (e.g. ATP) or SMILES"></textarea>
+        </section>
+        <section class="sec"><h3>Export for</h3>
+          <div class="row">
+            <select id="fmt" aria-label="Output format">
+              <option value="af3">AlphaFold 3 (local JSON)</option>
+              <option value="afserver">AlphaFold Server (JSON)</option>
+              <option value="boltz">Boltz-1 / Boltz-2 (YAML)</option>
+              <option value="chai">Chai-1 (FASTA)</option>
+              <option value="protenix">Protenix (JSON)</option>
+              <option value="colabfold">ColabFold / AF2-multimer (FASTA)</option>
+            </select>
+            <label class="note" id="affWrap"><input type="checkbox" id="affinity"> Boltz-2 affinity for first ligand</label>
+          </div>
+          <input class="field" id="jobName" value="fold_lens_job" aria-label="Job name">
+          <textarea id="jobOut" rows="12" readonly></textarea>
+          <div id="jobWarn" class="warn"></div>
+          <div class="row"><button class="btn small" id="copyJob">Copy</button><button class="btn small" id="saveJob">Save file</button><a class="note" id="runLink" href="https://alphafoldserver.com" target="_blank" rel="noopener">Where to run it</a></div>
+          <p>When the prediction finishes, drop its output folder files (or the zip) here: model CIF/PDB plus the confidence JSON or NPZ files. Fold Lens matches them up and shows pLDDT, PAE, pTM and ipTM.</p>
+        </section>
+      </div>
+      <div class="pane help" id="p-help" role="tabpanel" hidden></div>
+    </aside>
+  </main>
+</div>
+<div class="drop" id="drop" hidden>Drop structures, confidence files or a zip</div>
+
+<script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.3/build/3Dmol-min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script>
+"use strict";
+/* ============================== constants ============================== */
+const $ = s => document.querySelector(s);
+const AA = {ALA:'A',ARG:'R',ASN:'N',ASP:'D',CYS:'C',GLN:'Q',GLU:'E',GLY:'G',HIS:'H',ILE:'I',LEU:'L',LYS:'K',MET:'M',PHE:'F',PRO:'P',SER:'S',THR:'T',TRP:'W',TYR:'Y',VAL:'V',
+  MSE:'M',SEC:'U',PYL:'O',SEP:'S',TPO:'T',PTR:'Y',HYP:'P',MLY:'K',CSO:'C',KCX:'K',HIE:'H',HID:'H',HIP:'H',CYX:'C',ASH:'D',GLH:'E',LYN:'K',UNK:'X'};
+const AA_NAMES = {alanine:'ALA',arginine:'ARG',asparagine:'ASN',aspartate:'ASP','aspartic acid':'ASP',cysteine:'CYS',glutamine:'GLN',glutamate:'GLU','glutamic acid':'GLU',glycine:'GLY',histidine:'HIS',isoleucine:'ILE',leucine:'LEU',lysine:'LYS',methionine:'MET',phenylalanine:'PHE',proline:'PRO',serine:'SER',threonine:'THR',tryptophan:'TRP',tyrosine:'TYR',valine:'VAL'};
+const ONE2THREE = Object.fromEntries(Object.entries(AA).slice(0,20).map(([k,v])=>[v,k]));
+const DNA = {DA:'A',DC:'C',DG:'G',DT:'T',DI:'I',DU:'U'};
+const RNA = {A:'A',C:'C',G:'G',U:'U',I:'I',PSU:'U'};
+const WATER = new Set(['HOH','WAT','DOD','H2O','SOL','TIP','TIP3','SPC']);
+const IONS = new Set(['NA','CL','K','MG','CA','ZN','MN','FE','FE2','CO','NI','CU','CU1','CD','HG','SR','BA','CS','IOD','BR','F','LI','RB','AU','AG','PT','YB','GD','SM']);
+const GLYCANS = new Set(['NAG','NDG','MAN','BMA','FUC','FUL','GAL','GLA','GLC','BGC','SIA','XYP','A2G','NGA','BGLC']);
+const HYDRO = {ILE:4.5,VAL:4.2,LEU:3.8,PHE:2.8,CYS:2.5,MET:1.9,ALA:1.8,GLY:-0.4,THR:-0.7,SER:-0.8,TRP:-0.9,TYR:-1.3,PRO:-1.6,HIS:-3.2,GLU:-3.5,GLN:-3.5,ASP:-3.5,ASN:-3.5,LYS:-3.9,ARG:-4.5};
+const SETS = {
+  hydrophobic:['ALA','VAL','LEU','ILE','MET','PHE','TRP','PRO','CYS'],
+  polar:['SER','THR','ASN','GLN','TYR','HIS','CYS'],
+  charged:['ASP','GLU','LYS','ARG','HIS'],
+  positive:['LYS','ARG','HIS'], negative:['ASP','GLU'],
+  aromatic:['PHE','TYR','TRP','HIS'],
+};
+const ELEM = {N:0x3a6fe0,O:0xe0352b,S:0xe8c21a,P:0xff8000,SE:0xd18a00,F:0x7fd03b,CL:0x1fc01f,BR:0xa62929,I:0x940094,FE:0xe06633,ZN:0x7d80b0,MG:0x2fbf2f,CA:0x3dff00,MN:0x9c7ac7,CU:0xc88033,NA:0xab5cf2,K:0x8f40d4,H:0xdddddd};
+const CHAIN_COLS = [0x4c8bf5,0xf2a541,0x47b39d,0xe25c6b,0x9b7bd8,0x8fbf3a,0x3fbcd4,0xd77fb6,0xb08850,0x6c7fa0,0xe07f3d,0x5aa469];
+const MODEL_COLS = [0x8aa4c8,0xe08a3c,0x55b08a,0xc7579a,0x9c86d6,0xb8a43a];
+const LIGAND_C = 0xf0b429;
+const PL = {vh:0x0053d6,h:0x65cbf3,l:0xffdb13,vl:0xff7d45};
+const REP = {CARTOON:1,STICK:2,SPHERE:4,LINE:8,BS:16,TRACE:32};
+const COLOR_WORDS = ['red','blue','green','yellow','orange','purple','pink','magenta','cyan','white','black','grey','gray','teal','salmon','gold','brown','lime','violet','wheat','slate','hotpink','navy','maroon','olive','turquoise','coral','silver','lavender','tan','indigo','crimson','skyblue','forestgreen','darkgreen','lightblue','lightgreen','darkblue','darkred','beige','khaki','orchid','chartreuse','aquamarine','tomato','plum','peach','mint','rose'];
+const COLOR_ALIASES = {slate:'#7480c2',wheat:'#f5deb3',peach:'#ffcba4',mint:'#98e0b4',rose:'#ff6f91',grey:'#9aa3ad',gray:'#9aa3ad',hotpink:'#ff69b4',skyblue:'#87ceeb',forestgreen:'#228b22',lightblue:'#add8e6',lightgreen:'#90ee90',darkblue:'#00008b',darkred:'#8b0000',darkgreen:'#006400'};
+const AFSERVER_LIGANDS = new Set(['ADP','ATP','AMP','GTP','GDP','FAD','NAD','NAP','NDP','HEM','HEC','OLA','MYR','CIT','CLA','CHL','BCL','BCB']);
+const AFSERVER_IONS = new Set(['MG','ZN','CL','CA','NA','MN','K','FE','CU','CO']);
+
+/* ============================== state ============================== */
+const S = {viewer:null, models:[], active:-1, labels:[], shapes:[], surfaces:[], spinning:false, lastSel:null,
+  nextId:1, sample:null, downloads:null, mode:'local', chat:[], pendingConf:[], cartoonOpacity:1, legend:null, paeRef:null, entities:[], busy:false};
+
+/* ============================== utils ============================== */
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hex = n => '#'+(n>>>0).toString(16).padStart(6,'0');
+const fmt1 = v => (v==null||isNaN(v))?'–':(+v).toFixed(1);
+const fmt2 = v => (v==null||isNaN(v))?'–':(+v).toFixed(2);
+function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
+function lerp(a,b,t){return a+(b-a)*t}
+function mixCol(c1,c2,t){const r=lerp(c1>>16&255,c2>>16&255,t),g=lerp(c1>>8&255,c2>>8&255,t),b=lerp(c1&255,c2&255,t);return (Math.round(r)<<16)|(Math.round(g)<<8)|Math.round(b)}
+function gradient(stops,t){t=Math.max(0,Math.min(1,t));const n=stops.length-1;const i=Math.min(n-1,Math.floor(t*n));return mixCol(stops[i],stops[i+1],t*n-i)}
+const RAINBOW=[0x3b4cc0,0x2c7fd8,0x22b5c9,0x3cc272,0xb5d334,0xf4b52a,0xe8562a];
+const BWR=[0x2c5fd6,0xf2f2f2,0xd63a2c];
+const PAE_3D=[0x1d4fd1,0x8fc7f0,0xf5e9a8,0xf08a3c,0xc4242a];
+let _cssCtx;
+function parseColor(word){
+  if(!word) return null; word=word.toLowerCase().trim();
+  if(COLOR_ALIASES[word]) word=COLOR_ALIASES[word];
+  _cssCtx = _cssCtx || document.createElement('canvas').getContext('2d');
+  _cssCtx.fillStyle='#010203'; _cssCtx.fillStyle=word;
+  const v=_cssCtx.fillStyle; if(v==='#010203' && word!=='#010203') return null;
+  if(v.startsWith('#')) return parseInt(v.slice(1),16);
+  const m=v.match(/\d+/g); return m?((+m[0]<<16)|(+m[1]<<8)|+m[2]):null;
+}
+function plddtCol(v){return v>=90?PL.vh:v>=70?PL.h:v>=50?PL.l:PL.vl}
+function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+
+/* ============================== viewer init ============================== */
+function initViewer(){
+  if(typeof $3Dmol==='undefined'){ $('#emptyMsg').textContent='The 3D library could not load. Check your connection and reload the page.'; return false; }
+  S.viewer = $3Dmol.createViewer($('#viewer'), {backgroundColor: cssVar('--stage')||'#ffffff', antialias:true});
+  const syncBg=()=>{ if(S.viewer){ S.viewer.setBackgroundColor(cssVar('--stage')||'#ffffff'); S.viewer.render(); } };
+  try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>setTimeout(syncBg,30)); }catch(e){}
+  new MutationObserver(()=>setTimeout(syncBg,30)).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  new ResizeObserver(()=>{S.viewer.resize();S.viewer.render()}).observe($('#stage'));
+  $('#emptyMsg').innerHTML='<div><div style="font:600 17px var(--f-display);color:var(--ink);margin-bottom:6px">Drop a structure anywhere</div>PDB, mmCIF, AlphaFold, Boltz, Chai-1 and ColabFold outputs, or pick a sample.</div>';
+  return true;
+}
+
+/* ============================== loading ============================== */
+function detectFormat(text,name=''){
+  const n=name.toLowerCase();
+  if(/\.(cif|mmcif)$/.test(n)) return 'cif';
+  if(/\.(pdb|ent)$/.test(n)) return 'pdb';
+  if(/\.pqr$/.test(n)) return 'pqr';
+  if(/\.sdf$|\.mol$/.test(n)) return 'sdf';
+  if(/\.mol2$/.test(n)) return 'mol2';
+  if(/\.xyz$/.test(n)) return 'xyz';
+  if(/^data_/m.test(text.slice(0,4000))||text.includes('_atom_site.')) return 'cif';
+  if(/^(ATOM  |HETATM|HEADER|MODEL )/m.test(text.slice(0,200000))) return 'pdb';
+  if(text.includes('@<TRIPOS>')) return 'mol2';
+  if(/M {2}END|\$\$\$\$/.test(text)) return 'sdf';
+  return null;
+}
+function detectSource(text,name){
+  const head=text.slice(0,30000), n=name.toLowerCase();
+  const t=(head+' '+n);
+  if(/boltz/i.test(t)) return 'Boltz';
+  if(/chai/i.test(t)||/pred\.model_idx_\d/.test(n)) return 'Chai-1';
+  if(/protenix/i.test(t)) return 'Protenix';
+  if(/colabfold|_unrelaxed_rank_|_relaxed_rank_/i.test(t)) return 'ColabFold';
+  if(/alphafold\s*server|^fold_.*_model_\d/i.test(t)) return 'AlphaFold Server';
+  if(/alphafold\s*3|alphafold3|_model\.cif$/i.test(t)) return 'AlphaFold 3';
+  if(/esmfold/i.test(t)) return 'ESMFold';
+  if(/rosettafold/i.test(t)) return 'RoseTTAFold';
+  if(/openfold/i.test(t)) return 'OpenFold';
+  if(/alphafold|AF-[A-Z0-9]+-F\d/i.test(t)) return /AF-[A-Z0-9]+-F\d|alphafold db|alphafold monomer/i.test(t)?'AlphaFold DB':'AlphaFold';
+  return null;
+}
+function isExperimental(text){
+  return /^EXPDTA/m.test(text.slice(0,20000)) || /_exptl\.method/.test(text.slice(0,60000)) || /_refine\.ls_d_res_high|^REMARK   2 RESOLUTION/m.test(text.slice(0,80000));
+}
+function metaOf(text,fmt){
+  const m={};
+  if(fmt==='pdb'){
+    const t=text.match(/^TITLE {5}(.*)$/gm); if(t) m.title=t.map(l=>l.slice(10).trim()).join(' ').replace(/\s+/g,' ');
+    const e=text.match(/^EXPDTA\s+(.*)$/m); if(e) m.method=e[1].trim();
+    const r=text.match(/^REMARK   2 RESOLUTION\.\s+([\d.]+)/m); if(r) m.resolution=+r[1];
+    const id=text.match(/^HEADER.{56}(\w{4})/m); if(id) m.id=id[1];
+  } else if(fmt==='cif'){
+    const t=text.match(/_struct\.title\s+(?:'([^']*)'|"([^"]*)"|\n;([\s\S]*?)\n;|(\S+))/); if(t) m.title=(t[1]||t[2]||t[3]||t[4]||'').replace(/\s+/g,' ').trim();
+    const e=text.match(/_exptl\.method\s+'?([^'\n]+)'?/); if(e) m.method=e[1].trim();
+    const r=text.match(/_refine\.ls_d_res_high\s+([\d.]+)/)||text.match(/_em_3d_reconstruction\.resolution\s+([\d.]+)/)||text.match(/_reflns\.d_resolution_high\s+([\d.]+)/); if(r) m.resolution=+r[1];
+    const id=text.match(/^data_(\S+)/m); if(id) m.id=id[1];
+  }
+  if(m.title && m.title.length>140) m.title=m.title.slice(0,137)+'…';
+  return m;
+}
+function classify(a){
+  const rn=(a.resn||'').trim().toUpperCase();
+  if(WATER.has(rn)) return 'water';
+  if(AA[rn] && (!a.hetflag || rn in AA)) { if(!a.hetflag || ['MSE','SEP','TPO','PTR','HYP','MLY','CSO','KCX','SEC','PYL'].includes(rn)) return 'protein'; }
+  if(DNA[rn]) return 'dna';
+  if(RNA[rn] && !a.hetflag) return 'rna';
+  if(IONS.has(rn) || (a.hetflag && /^[A-Z]{1,2}$/.test(rn) && IONS.has(rn))) return 'ion';
+  if(GLYCANS.has(rn)) return 'glycan';
+  if(!a.hetflag && AA[rn]) return 'protein';
+  return 'ligand';
+}
+const POLY = new Set(['protein','dna','rna']);
+
+function buildIndex(M){
+  const atoms = M.model.selectedAtoms({});
+  M.atoms = atoms;
+  const residues=[], rmap=new Map(), chains=new Map();
+  let bmin=Infinity,bmax=-Infinity;
+  for(const a of atoms){
+    a._m=M; a._cls=classify(a);
+    const ic=(a.icode||'').trim();
+    const rk=M.id+'|'+a.chain+'|'+a.resi+ic;
+    a._rk=rk;
+    let r=rmap.get(rk);
+    if(!r){ r={key:rk,chain:a.chain,resi:a.resi,icode:ic,resn:(a.resn||'').trim().toUpperCase(),cls:a._cls,atoms:[],rep:null,M}; rmap.set(rk,r); residues.push(r);
+      if(!chains.has(a.chain)) chains.set(a.chain,{id:a.chain,residues:[],poly:[]});
+      chains.get(a.chain).residues.push(r); if(POLY.has(r.cls)) chains.get(a.chain).poly.push(r); }
+    r.atoms.push(a); a._r=r;
+    if(a.b!=null && a._cls!=='water'){ bmin=Math.min(bmin,a.b); bmax=Math.max(bmax,a.b); }
+  }
+  for(const r of residues){
+    r.rep = r.atoms.find(a=>a.atom==='CA') || r.atoms.find(a=>a.atom==="C1'"||a.atom==='P') || null;
+    if(!r.rep){ const c=centroid(r.atoms); r.center=c; } else r.center={x:r.rep.x,y:r.rep.y,z:r.rep.z};
+    r.one = r.cls==='protein'?(AA[r.resn]||'X'): r.cls==='dna'?(DNA[r.resn]||'N'): r.cls==='rna'?(RNA[r.resn]||'N'):'';
+  }
+  for(const ch of chains.values()){ ch.poly.forEach((r,i)=>{r.ri=i;r.nchain=ch.poly.length;}); ch.type = ch.poly.length? (ch.poly.filter(r=>r.cls==='protein').length>=ch.poly.length/2?'protein':(ch.poly.some(r=>r.cls==='dna')?'dna':'rna')) : 'other'; }
+  M.residues=residues; M.rmap=rmap; M.chains=chains; M.bmin=bmin; M.bmax=bmax;
+  let ci=0; for(const ch of chains.values()){ if(ch.poly.length) ch.color=CHAIN_COLS[ci++%CHAIN_COLS.length]; }
+  for(const ch of chains.values()) if(!ch.color) ch.color=CHAIN_COLS[ci++%CHAIN_COLS.length];
+  M.resnSet=new Set(residues.map(r=>r.resn));
+}
+function centroid(list){let x=0,y=0,z=0;for(const a of list){x+=a.x;y+=a.y;z+=a.z}const n=list.length||1;return {x:x/n,y:y/n,z:z/n}}
+
+function plddtOf(a){ const M=a._m; if(!M.plddt) return null; return a.b*M.plddtScale; }
+
+function addStructure(text,name,opts={}){
+  const fmt = opts.format || detectFormat(text,name);
+  if(!fmt) throw new Error(`${name}: not a structure file I can read (PDB, mmCIF, SDF, MOL2, XYZ, PQR).`);
+  const model = S.viewer.addModel(text, fmt, {keepH:false, doAssembly:false});
+  if(!model || !model.selectedAtoms({}).length){ if(model) S.viewer.removeModel(model); throw new Error(`${name}: no atoms found.`); }
+  const nmr = (fmt==='pdb' && typeof text==='string') ? (text.match(/^MODEL /gm)||[]).length : 0;
+  const M = {id:S.nextId++, name:opts.label||name.replace(/\.(pdb|ent|cif|mmcif|bcif|pqr|sdf|mol2|xyz)(\.gz)?$/i,''), file:name, model, fmt, visible:true,
+    meta:metaOf(typeof text==='string'?text:'',fmt), source:detectSource(typeof text==='string'?text:'',name), nmr, pae:null, conf:null, tokens:null};
+  buildIndex(M);
+  const str = typeof text==='string'?text:'';
+  const exp = isExperimental(str);
+  const bOk = M.bmin>=0 && M.bmax<=100.01;
+  M.plddt = !exp && bOk && M.bmax>0 && !(fmt==='sdf'||fmt==='mol2'||fmt==='xyz');
+  if(exp) M.source=null;
+  if(M.plddt && !M.source) M.source='Predicted model';
+  M.plddtScale = (M.plddt && M.bmax<=1.0001) ? 100 : 1;
+  M.kind = M.plddt?'predicted':'experimental';
+  S.models.push(M);
+  // default styles
+  for(const a of M.atoms){
+    a._rep = POLY.has(a._cls)?REP.CARTOON : a._cls==='water'?0 : a._cls==='ion'?REP.SPHERE : REP.STICK;
+    a._col = M.plddt ? 'plddt' : (S.models.length>1 && !POLY.has(a._cls)) ? 'chain' : 'chain';
+    if(a._cls==='ligand'||a._cls==='glycan') a._col='ligand';
+    if(a._cls==='ion') a._col='element';
+  }
+  // single-residue molecule files: show sticks
+  if(!M.residues.some(r=>POLY.has(r.cls))) for(const a of M.atoms){ a._rep=REP.STICK; a._col='ligand'; }
+  S.active = S.models.length-1;
+  setClickable(M);
+  tryAttachPending();
+  return M;
+}
+function setClickable(M){
+  M.model.setClickable({}, true, (atom)=>onAtomClick(atom));
+  M.model.setHoverable({}, true, (atom)=>showReadout(atom), ()=>{$('#readout').hidden=true;});
+}
+function atomDesc(a){
+  const r=a._r; const multi=r.M.chains.size>1||S.models.length>1;
+  let s=`${multi?(S.models.length>1?`#${r.M.id} `:'')+'chain '+r.chain+' · ':''}${r.resn} ${r.resi}${r.icode} · ${a.atom}`;
+  const p=plddtOf(a); if(p!=null) s+=` · pLDDT ${fmt1(p)}`; else if(a.b!=null) s+=` · B ${fmt1(a.b)}`;
+  return s;
+}
+function showReadout(a){ const el=$('#readout'); el.textContent=atomDesc(a); el.hidden=false; }
+function onAtomClick(a){
+  const r=a._r;
+  const lbl=labelFor(r);
+  const exist=S.labels.find(l=>l.key===r.key);
+  if(exist){ S.viewer.removeLabel(exist.obj); S.labels=S.labels.filter(l=>l!==exist); }
+  else addLabel(r.key,lbl,r.center);
+  S.lastSel = selFromResidues([r], lbl);
+  logMsg('viewer', `${atomDesc(a)}. Say “it” to refer to this residue.`);
+  S.viewer.render();
+}
+function labelFor(r){ const multi=r.M.chains.size>1; return (POLY.has(r.cls)? (r.cls==='protein'?r.resn.charAt(0)+r.resn.slice(1).toLowerCase():r.resn) : r.resn)+r.resi+(r.icode||'')+(multi?':'+r.chain:''); }
+
+async function loadFiles(fileList){
+  const files=[...fileList]; if(!files.length) return;
+  const expanded=[];
+  for(const f of files){
+    const name=f.name;
+    if(/\.zip$/i.test(name)){
+      if(typeof fflate==='undefined'){ logMsg('err','Zip support did not load. Unzip the folder and drop the files instead.'); continue; }
+      const buf=new Uint8Array(await f.arrayBuffer());
+      const ent=fflate.unzipSync(buf);
+      for(const [p,data] of Object.entries(ent)){ if(p.endsWith('/')||/__MACOSX|\/\./.test(p)) continue; expanded.push({name:p.split('/').pop(),bytes:data}); }
+    } else expanded.push({name, bytes:new Uint8Array(await f.arrayBuffer())});
+  }
+  // gz
+  for(const e of expanded){ if(/\.gz$/i.test(e.name) && typeof fflate!=='undefined'){ try{ e.bytes=fflate.gunzipSync(e.bytes); e.name=e.name.replace(/\.gz$/i,''); }catch(err){} } }
+  const structs=expanded.filter(e=>/\.(pdb|ent|cif|mmcif|pqr|sdf|mol2|xyz|bcif)$/i.test(e.name));
+  const confs=expanded.filter(e=>/\.(json|npz)$/i.test(e.name));
+  const loaded=[];
+  structs.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  // AF Server zips contain 5 models; load the top one unless the user dropped single files
+  let toLoad=structs;
+  const fromZip = files.some(f=>/\.zip$/i.test(f.name));
+  if(fromZip && structs.length>1){
+    const top = structs.filter(e=>/(_model_0|model_idx_0|rank_001|_model\.cif)/i.test(e.name));
+    if(top.length){ toLoad=top; logMsg('viewer',`The archive holds ${structs.length} models; loaded the top-ranked one. Drop others to compare.`); }
+  }
+  for(const e of toLoad){
+    try{
+      if(/\.bcif$/i.test(e.name)) loaded.push(addStructure(e.bytes,e.name,{format:'bcif'}));
+      else loaded.push(addStructure(new TextDecoder().decode(e.bytes),e.name));
+    }catch(err){ logMsg('err', err.message||String(err)); }
+  }
+  for(const e of confs){
+    try{
+      const parsed = /\.npz$/i.test(e.name) ? parseNpzConf(e.bytes,e.name) : parseJsonConf(JSON.parse(new TextDecoder().decode(e.bytes)), e.name);
+      if(parsed) S.pendingConf.push(parsed); else logMsg('err',`${e.name}: no confidence data recognised in this file.`);
+    }catch(err){ logMsg('err',`${e.name}: ${err.message}`); }
+  }
+  tryAttachPending();
+  if(loaded.length){ afterLoad(); logMsg('viewer', loaded.map(describeLoaded).join('\n')); }
+  else if(confs.length){ refreshAll(); }
+}
+function describeLoaded(M){
+  const pc=[...M.chains.values()].filter(c=>c.poly.length);
+  const ligs=ligandsOf(M);
+  let s=`Loaded ${M.name}: ${pc.length} polymer chain${pc.length===1?'':'s'}, ${M.residues.filter(r=>POLY.has(r.cls)).length} residues`;
+  if(ligs.length) s+=`, ligands ${[...new Set(ligs.map(r=>r.resn))].join(', ')}`;
+  if(M.plddt) s+=`. ${M.source}; coloured by pLDDT (mean ${fmt1(meanPlddt(M.residues))})`;
+  if(M.nmr>1) s+=`. NMR ensemble: showing model 1 of ${M.nmr}`;
+  return s+'.';
+}
+function afterLoad(){
+  $('#emptyMsg').hidden=true;
+  renderStyles(); S.viewer.zoomTo(); S.viewer.render();
+  refreshAll(); buildEntities();
+}
+async function loadSample(file){
+  try{
+    const res=await fetch('samples/'+file); if(!res.ok) throw new Error('HTTP '+res.status);
+    const text=await res.text(); const M=addStructure(text,file); afterLoad(); logMsg('viewer',describeLoaded(M));
+  }catch(e){ logMsg('err',`Could not load the sample ${file}: ${e.message}`); }
+}
+async function fetchById(id){
+  id=id.trim(); if(!id) return;
+  const isPdb=/^[0-9][A-Za-z0-9]{3}$/.test(id);
+  const label=id.toUpperCase();
+  logMsg('you',`fetch ${label}`);
+  try{
+    if(isPdb){
+      const r=await fetch(`https://files.rcsb.org/download/${label}.cif`); if(!r.ok) throw new Error('RCSB answered '+r.status);
+      const M=addStructure(await r.text(),label+'.cif'); afterLoad(); logMsg('viewer',describeLoaded(M));
+    } else {
+      const acc=label.replace(/^AF-|-F\d+.*$/g,'');
+      const api=await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${acc}`); if(!api.ok) throw new Error('AlphaFold DB answered '+api.status);
+      const info=(await api.json())[0];
+      const t=await (await fetch(info.cifUrl||info.pdbUrl)).text();
+      const M=addStructure(t,(info.entryId||acc)+(info.cifUrl?'.cif':'.pdb'),{label:(info.uniprotDescription?info.uniprotDescription+' · ':'')+(info.entryId||acc)});
+      M.source='AlphaFold DB';
+      if(info.paeDocUrl){ try{ const pj=await (await fetch(info.paeDocUrl)).json(); const c=parseJsonConf(pj,'pae.json'); if(c) attachConf(M,c); }catch(e){} }
+      afterLoad(); logMsg('viewer',describeLoaded(M));
+    }
+  }catch(e){
+    const url = isPdb?`https://www.rcsb.org/structure/${label}`:`https://alphafold.ebi.ac.uk/entry/${label}`;
+    logMsg('err',`This viewer can't reach outside websites, so ${label} could not be fetched here. Download it from ${url} and drop the file in. (The copy of Fold Lens in the repository can fetch directly when opened in a normal browser tab.)`);
+  }
+}
+
+/* ============================== confidence files ============================== */
+function parseJsonConf(j,name){
+  const out={name, metrics:{}};
+  if(Array.isArray(j) && j[0] && j[0].predicted_aligned_error){ out.pae=j[0].predicted_aligned_error; out.paeMax=j[0].max_predicted_aligned_error; out.src='AlphaFold DB'; return out; }
+  if(Array.isArray(j) && j[0] && j[0].distance){ return null; }
+  if(j.predicted_aligned_error){ out.pae=j.predicted_aligned_error; out.paeMax=j.max_predicted_aligned_error; return out; }
+  if(Array.isArray(j.pae) && Array.isArray(j.pae[0])) out.pae=j.pae;
+  if(j.token_chain_ids) out.tokChains=j.token_chain_ids;
+  if(j.token_res_ids) out.tokRes=j.token_res_ids;
+  if(Array.isArray(j.plddt)) out.plddt=j.plddt;
+  if(Array.isArray(j.atom_plddts)) out.atomPlddt=j.atom_plddts;
+  const keys=['ranking_score','ptm','iptm','fraction_disordered','has_clash','confidence_score','complex_plddt','complex_iplddt','complex_pde','complex_ipde','ligand_iptm','protein_iptm','max_pae','aggregate_score'];
+  for(const k of keys) if(typeof j[k]==='number'||typeof j[k]==='boolean') out.metrics[k]=j[k];
+  if(j.chain_pair_iptm) out.chainPair=j.chain_pair_iptm;
+  if(j.pair_chains_iptm){ const p=j.pair_chains_iptm; const ks=Object.keys(p).sort((a,b)=>a-b); out.chainPair=ks.map(a=>ks.map(b=>p[a][b])); }
+  if(j.chain_ptm) out.chainPtm=Array.isArray(j.chain_ptm)?j.chain_ptm:Object.values(j.chain_ptm);
+  if(j.chain_iptm) out.chainIptm=j.chain_iptm;
+  if(out.metrics.confidence_score!=null) out.src='Boltz';
+  else if(out.tokChains||'ranking_score' in out.metrics) out.src='AlphaFold 3';
+  else if(out.pae && out.plddt) out.src='ColabFold';
+  if(!out.pae && !Object.keys(out.metrics).length && !out.plddt) return null;
+  return out;
+}
+function parseNpy(bytes){
+  if(bytes[0]!==0x93||String.fromCharCode(...bytes.slice(1,6))!=='NUMPY') throw new Error('not an npy array');
+  const major=bytes[6]; const hlen = major===1 ? bytes[8]|(bytes[9]<<8) : bytes[8]|(bytes[9]<<8)|(bytes[10]<<16)|(bytes[11]<<24);
+  const hstart = major===1?10:12; const header=new TextDecoder().decode(bytes.slice(hstart,hstart+hlen));
+  const descr=header.match(/'descr':\s*'([^']+)'/)[1]; const fortran=/'fortran_order':\s*True/.test(header);
+  const shape=(header.match(/'shape':\s*\(([^)]*)\)/)[1].split(',').map(s=>s.trim()).filter(Boolean).map(Number));
+  const off=hstart+hlen; const buf=bytes.buffer.slice(bytes.byteOffset+off, bytes.byteOffset+bytes.byteLength);
+  const n=shape.reduce((a,b)=>a*b,1); let data;
+  const le = descr[0]!=='>';
+  const dv=new DataView(buf);
+  const t=descr.slice(1);
+  data=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    switch(t){
+      case 'f8': data[i]=dv.getFloat64(i*8,le); break;
+      case 'f4': data[i]=dv.getFloat32(i*4,le); break;
+      case 'f2': { const h=dv.getUint16(i*2,le); const s=h>>15, e=(h>>10)&31, f=h&1023; data[i]=(s?-1:1)*(e===0?Math.pow(2,-14)*(f/1024):e===31?(f?NaN:Infinity):Math.pow(2,e-15)*(1+f/1024)); break; }
+      case 'i8': data[i]=Number(dv.getBigInt64(i*8,le)); break;
+      case 'i4': data[i]=dv.getInt32(i*4,le); break;
+      case 'i2': data[i]=dv.getInt16(i*2,le); break;
+      case 'u1': case 'b1': data[i]=dv.getUint8(i); break;
+      case 'i1': data[i]=dv.getInt8(i); break;
+      default: throw new Error('unsupported array type '+descr);
+    }
+  }
+  return {shape,data,fortran};
+}
+function parseNpzConf(bytes,name){
+  if(typeof fflate==='undefined') throw new Error('NPZ support did not load');
+  const ent=fflate.unzipSync(bytes); const arrs={};
+  for(const [k,v] of Object.entries(ent)){ try{ arrs[k.replace(/\.npy$/,'')]=parseNpy(v); }catch(e){} }
+  const out={name,metrics:{},src:/chai|model_idx/i.test(name)?'Chai-1':/boltz|pae_|plddt_|pde_/i.test(name)?'Boltz':null};
+  for(const [k,a] of Object.entries(arrs)){
+    const sh=a.shape.filter(x=>x>1);
+    if(a.shape.length===0 || a.data.length===1){ out.metrics[k]=a.data[0]; continue; }
+    if((k==='pae'||k==='predicted_aligned_error'||(sh.length===2&&sh[0]===sh[1]&&!out.pae)) && sh.length===2 && sh[0]===sh[1]){
+      const n=sh[0]; const rows=[]; for(let i=0;i<n;i++){ const row=new Array(n); for(let j=0;j<n;j++) row[j]=a.fortran?a.data[j*n+i]:a.data[i*n+j]; rows.push(row);} if(k!=='pde') out.pae=rows; else out.pde=rows; continue; }
+    if(k==='plddt' && sh.length===1){ out.plddt=[...a.data]; continue; }
+    if(/per_chain_pair_iptm|pair_chains_iptm/.test(k) && sh.length===2){ const n=sh[0]; out.chainPair=[]; for(let i=0;i<n;i++) out.chainPair.push([...a.data.slice(i*n,i*n+n)]); continue; }
+    if(/per_chain_ptm|chain_ptm/.test(k)){ out.chainPtm=[...a.data]; continue; }
+  }
+  if(!out.pae && !Object.keys(out.metrics).length && !out.plddt) return null;
+  return out;
+}
+function nameStem(n){
+  return n.toLowerCase().replace(/\.(json|npz|cif|pdb|mmcif|ent)$/,'')
+    .replace(/summary_confidences|full_data|confidence|predicted_aligned_error|scores|unrelaxed|relaxed|plddt|pae|pde|_model|model/g,'').replace(/alphafold2_(multimer_v\d|ptm)/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function nums(n){ return (n.match(/\d+/g)||[]).join(','); }
+function stemScore(a,b){ const A=nameStem(a),B=nameStem(b); let i=0; while(i<A.length&&i<B.length&&A[i]===B[i]) i++; let s=i; if(nums(A).split(',').pop()===nums(B).split(',').pop()) s+=5; return s; }
+function tryAttachPending(){
+  if(!S.pendingConf.length || !S.models.length) return;
+  const keep=[];
+  for(const c of S.pendingConf){
+    let best=null,bs=-1;
+    for(const M of S.models){
+      let sc=stemScore(c.name,M.file);
+      if(c.pae){ const t=tokensFor(M,c); if(t && t.length===c.pae.length) sc+=20; else if(!t) sc-=50; }
+      if(sc>bs){bs=sc;best=M;}
+    }
+    if(best) attachConf(best,c); else keep.push(c);
+  }
+  S.pendingConf=keep;
+}
+function attachConf(M,c){
+  M.conf = M.conf || {metrics:{}};
+  Object.assign(M.conf.metrics, c.metrics||{});
+  if(c.chainPair) M.conf.chainPair=c.chainPair;
+  if(c.chainPtm) M.conf.chainPtm=c.chainPtm;
+  if(c.src && (!M.source || M.source==='Predicted model')) M.source=c.src;
+  if(c.pae){
+    const toks=tokensFor(M,c);
+    M.pae={matrix:c.pae,n:c.pae.length,max:c.paeMax||Math.max(...c.pae.map(r=>Math.max(...r))),tokens:toks,file:c.name};
+    if(!toks) logMsg('err',`PAE in ${c.name} has ${c.pae.length} tokens but ${M.name} has ${M.residues.filter(r=>POLY.has(r.cls)).length} residues; showing the matrix without linking it to the 3D view.`);
+  }
+  if(c.plddt && !M.plddt){
+    const poly=M.residues.filter(r=>POLY.has(r.cls));
+    if(c.plddt.length===poly.length){ const sc=Math.max(...c.plddt)<=1?100:1; poly.forEach((r,i)=>r.atoms.forEach(a=>a.b=c.plddt[i]*sc)); M.plddt=true; M.plddtScale=1; M.kind='predicted'; for(const a of M.atoms) if(POLY.has(a._cls)) a._col='plddt'; }
+  }
+  logMsg('viewer',`Attached ${c.name} to ${M.name}${c.pae?` (PAE ${c.pae.length}×${c.pae.length})`:''}${Object.keys(c.metrics||{}).length?`: ${Object.entries(c.metrics).slice(0,4).map(([k,v])=>k+' '+(typeof v==='number'?fmt2(v):v)).join(', ')}`:''}.`);
+  renderStyles(); refreshAll();
+}
+// token list for a PAE matrix: AF3-style (one per residue, one per ligand heavy atom), or polymer-only
+function tokensFor(M,c){
+  const n=c.pae?c.pae.length:0;
+  if(c.tokChains && c.tokRes && c.tokChains.length===n){
+    const out=[]; for(let i=0;i<n;i++){ const r=M.residues.find(r=>r.chain===c.tokChains[i] && +r.resi===+c.tokRes[i]); out.push(r||null); }
+    if(out.filter(Boolean).length>n*0.8) return out;
+  }
+  const all=[]; for(const r of M.residues){ if(r.cls==='water') continue; if(POLY.has(r.cls)) all.push(r); else for(const a of r.atoms) if(a.elem!=='H') all.push(r); }
+  if(all.length===n) return all;
+  const poly=M.residues.filter(r=>POLY.has(r.cls));
+  if(poly.length===n) return poly;
+  const perRes=M.residues.filter(r=>r.cls!=='water');
+  if(perRes.length===n) return perRes;
+  return null;
+}
+function meanPlddt(res){ let s=0,k=0; for(const r of res){ if(!POLY.has(r.cls)) continue; const a=r.rep||r.atoms[0]; const p=plddtOf(a); if(p!=null){s+=p;k++;} } return k?s/k:null; }
+
+/* ============================== styling ============================== */
+function colorOf(a){
+  const M=a._m, r=a._r, k=a._col;
+  switch(k){
+    case 'chain': return (M.chains.get(a.chain)||{}).color||0x999999;
+    case 'ligand': return LIGAND_C;
+    case 'plddt': { const p=plddtOf(a); return p==null?0xaaaaaa:plddtCol(p); }
+    case 'b': { const t=(a.b-M.bmin)/((M.bmax-M.bmin)||1); return gradient(BWR,t); }
+    case 'rainbow': return r.nchain? gradient(RAINBOW, r.ri/Math.max(1,r.nchain-1)) : LIGAND_C;
+    case 'ss': return !POLY.has(a._cls)?LIGAND_C: a.ss==='h'?0xd6457f: a.ss==='s'?0xf2b51b: 0xb9c2cc;
+    case 'element': return a.elem==='C'?0xa9b3bd:(ELEM[(a.elem||'').toUpperCase()]||0xcc77cc);
+    case 'hydro': { const h=HYDRO[r.resn]; return h==null?0xb0b0b0:gradient([0x2a8fbd,0xf1f1ef,0xd9822b],(h+4.5)/9); }
+    case 'restype': { const n=r.resn; return SETS.positive.includes(n)?0x3b6fe0: SETS.negative.includes(n)?0xd83b3b: ['SER','THR','ASN','GLN','TYR','CYS'].includes(n)?0x3fae6a: n==='GLY'||n==='PRO'?0xb67ee0: AA[n]?0xd9d3c4: POLY.has(r.cls)?0xf08c3c:LIGAND_C; }
+    case 'model': return MODEL_COLS[(S.models.indexOf(M))%MODEL_COLS.length];
+    case 'pae': { const v=S.paeRef&&S.paeRef.vals.get(r.key); if(S.paeRef&&S.paeRef.ref===r.key) return 0xd0109b; return v==null?0x9aa0a6:gradient(PAE_3D,v/Math.max(1,S.paeRef.max)); }
+    default: if(k&&k.startsWith('#')) return parseInt(k.slice(1),16); return 0x999999;
+  }
+}
+function renderStyles(){
+  if(!S.viewer) return;
+  for(const M of S.models){
+    const groups=new Map();
+    for(const a of M.atoms){
+      a.cc=colorOf(a); const E=(a.elem||'').toUpperCase(); a.ce=(E!=='C' && ELEM[E] && a._col!=='element' && !(a._col||'').startsWith('#') && a._cls!=='ion')?ELEM[E]:a.cc;
+      const k=M.visible?a._rep:0; if(!groups.has(k)) groups.set(k,true); a._g=k;
+    }
+    M.model.setStyle({}, {});
+    for(const k of groups.keys()){
+      if(!k) continue;
+      const spec={};
+      if(k&REP.CARTOON) spec.cartoon={colorfunc:a=>a.cc, opacity:S.cartoonOpacity, arrows:true};
+      if(k&REP.TRACE) spec.cartoon={colorfunc:a=>a.cc, style:'trace', thickness:0.4, opacity:S.cartoonOpacity};
+      if(k&REP.STICK) spec.stick={colorfunc:a=>a.ce, radius:0.18};
+      if(k&REP.BS){ spec.stick={colorfunc:a=>a.ce, radius:0.12}; spec.sphere={colorfunc:a=>a.ce, scale:0.25}; }
+      if(k&REP.SPHERE) spec.sphere={colorfunc:a=>a.ce};
+      if(k&REP.LINE) spec.line={colorfunc:a=>a.ce};
+      M.model.setStyle({predicate:a=>a._g===k}, spec);
+    }
+  }
+  // sticks drawn on residues shown as cartoon should hide backbone atoms only when cartoon also on: keep simple
+  updateLegend();
+  S.viewer.render();
+}
+function updateLegend(){
+  const el=$('#legend'); const cols=new Set();
+  for(const M of S.models) if(M.visible) for(const r of M.residues){ const a=r.rep||r.atoms[0]; if(a._rep) cols.add(a._col); }
+  let html='';
+  if(cols.has('plddt')) html+=`<b>pLDDT</b><span><i style="background:${hex(PL.vh)}"></i>Very high (≥90)</span><span><i style="background:${hex(PL.h)}"></i>Confident (70–90)</span><span><i style="background:${hex(PL.l)}"></i>Low (50–70)</span><span><i style="background:${hex(PL.vl)}"></i>Very low (&lt;50)</span>`;
+  else if(cols.has('pae')&&S.paeRef) html+=`<b>PAE vs ${esc(S.paeRef.label)}</b><span><i style="background:${hex(PAE_3D[0])}"></i>0 Å</span><span><i style="background:${hex(PAE_3D[2])}"></i>${fmt1(S.paeRef.max/2)} Å</span><span><i style="background:${hex(PAE_3D[4])}"></i>${fmt1(S.paeRef.max)} Å</span>`;
+  else if(cols.has('hydro')) html+=`<b>Hydrophobicity</b><span><i style="background:#d9822b"></i>Hydrophobic</span><span><i style="background:#f1f1ef"></i>Neutral</span><span><i style="background:#2a8fbd"></i>Hydrophilic</span>`;
+  else if(cols.has('ss')) html+=`<b>Secondary structure</b><span><i style="background:#d6457f"></i>Helix</span><span><i style="background:#f2b51b"></i>Strand</span><span><i style="background:#b9c2cc"></i>Loop</span>`;
+  else if(cols.has('restype')) html+=`<b>Residue type</b><span><i style="background:#3b6fe0"></i>Positive</span><span><i style="background:#d83b3b"></i>Negative</span><span><i style="background:#3fae6a"></i>Polar</span><span><i style="background:#d9d3c4"></i>Hydrophobic</span><span><i style="background:#b67ee0"></i>Gly / Pro</span>`;
+  else if(cols.has('b')) html+=`<b>B-factor</b><span><i style="background:${hex(BWR[0])}"></i>${fmt1(S.models[S.active]?.bmin)}</span><span><i style="background:${hex(BWR[2])}"></i>${fmt1(S.models[S.active]?.bmax)}</span>`;
+  else if(cols.has('rainbow')) html+=`<b>Chain position</b><span><i style="background:${hex(RAINBOW[0])}"></i>N-terminus</span><span><i style="background:${hex(RAINBOW[6])}"></i>C-terminus</span>`;
+  else if(cols.has('chain')){ const M=S.models[S.active]; if(M){ const cs=[...M.chains.values()].filter(c=>c.poly.length).slice(0,8); if(cs.length>1) html+='<b>Chains</b>'+cs.map(c=>`<span><i style="background:${hex(c.color)}"></i>${esc(c.id)} · ${c.type} · ${c.poly.length} res</span>`).join(''); } }
+  el.innerHTML=html; el.hidden=!html;
+}
+
+/* ============================== selection language ============================== */
+const ALL = {test:a=>a._cls!=='water', desc:'everything'};
+function selFromResidues(list,desc){ const ks=new Set(list.map(r=>r.key)); return {test:a=>ks.has(a._rk), desc}; }
+function allAtoms(){ const out=[]; for(const M of S.models) for(const a of M.atoms) out.push(a); return out; }
+function atomsIn(sel){ return allAtoms().filter(sel.test); }
+function residuesIn(sel){ const seen=new Set(), out=[]; for(const a of allAtoms()){ if(sel.test(a) && !seen.has(a._rk)){ seen.add(a._rk); out.push(a._r); } } return out; }
+function nearSet(srcAtoms, d, candTest){
+  const cell=d, grid=new Map(); const key=(x,y,z)=>x+','+y+','+z;
+  for(const a of srcAtoms){ const k=key(Math.floor(a.x/cell),Math.floor(a.y/cell),Math.floor(a.z/cell)); (grid.get(k)||grid.set(k,[]).get(k)).push(a); }
+  const d2=d*d, hit=new Set();
+  for(const a of allAtoms()){ if(!candTest(a)) continue; const cx=Math.floor(a.x/cell),cy=Math.floor(a.y/cell),cz=Math.floor(a.z/cell);
+    outer: for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++)for(let k=-1;k<=1;k++){ const l=grid.get(key(cx+i,cy+j,cz+k)); if(!l) continue; for(const b of l){ if(b._m!==a._m) continue; const dx=a.x-b.x,dy=a.y-b.y,dz=a.z-b.z; if(dx*dx+dy*dy+dz*dz<=d2){ hit.add(a._rk); break outer; } } } }
+  return hit;
+}
+function chainIds(){ const s=new Set(); for(const M of S.models) for(const c of M.chains.keys()) s.add(c); return s; }
+function allResn(){ const s=new Set(); for(const M of S.models) for(const r of M.resnSet) s.add(r); return s; }
+function parseRanges(str){ // "10-20|30|40-45"
+  return str.split('|').map(p=>{ const m=p.match(/^(-?\d+)[a-z]?(?:-(-?\d+))?$/i); return m?[+m[1], m[2]!=null?+m[2]:+m[1]]:null; }).filter(Boolean);
+}
+function preprocessSel(t){
+  // chain lists keep their case
+  t=t.replace(/\bchains?\s+([A-Za-z0-9]{1,4})((?:\s*(?:,|and|&|\+|or)\s*[A-Za-z0-9]{1,4}\b)*)/gi,(m,a,b)=>{ const ids=[a,...(b.match(/[A-Za-z0-9]{1,4}/g)||[]).filter(x=>!/^(and|or)$/i.test(x))]; return ' chain='+ids.join('|')+' '; });
+  t=t.replace(/\b(?:residues?|res|resi|positions?|amino acids?|aa|nucleotides?|bases?)\s*(\d+[a-z]?(?:\s*(?:-|–|to|through|thru|\.\.)\s*\d+)?(?:\s*(?:,|and|&)\s*\d+[a-z]?(?:\s*(?:-|–|to|through|thru)\s*\d+)?)*)/gi,(m,a)=>{
+    const parts=a.split(/\s*(?:,|and|&)\s*/).map(p=>p.replace(/\s*(?:–|to|through|thru|\.\.)\s*|\s*-\s*/,'-').replace(/\s+/g,'')); return ' resi='+parts.join('|')+' '; });
+  t=t.replace(/\b([A-Za-z0-9])[:/](\d+(?:-\d+)?)\b/g,' chain=$1 resi=$2 ');
+  t=t.replace(/(?<![=\d|-])\b(\d+)\s*(?:-|–|to)\s*(\d+)\b/g,' resi=$1-$2 ');
+  return t.replace(/\s+/g,' ').trim();
+}
+function parseSel(text, ctx={}){
+  let t=(text||'').trim().replace(/^[,\s]+|[,.?!\s]+$/g,'').replace(/^(?:the|all|all of the|every|any)\s+/i,'').trim();
+  if(!t || /^(everything|all|all atoms|whole (?:thing|structure|complex)|structure|complex|molecule|model|it all|scene)$/i.test(t)) return ALL;
+  if(/^(it|them|those|these|that|this|selection|the selection|same|they)$/i.test(t)) return S.lastSel||ALL;
+  // within / near
+  let m=t.match(/^(.*?)\s*\b(?:within|around|near|nearby|close to|next to|in contact with|contacting|surrounding|touching)\b\s*(?:(\d+(?:\.\d+)?)\s*(?:å|a|angstroms?|ang)?\b\s*)?(?:of|from|to)?\s*(.+)$/i);
+  if(m){ const d=m[2]?+m[2]:5; const src=parseSel(m[3]); if(src.err) return src; const sa=atomsIn(src);
+    const base=m[1].trim()? parseSel(m[1]) : {test:a=>a._cls!=='water', desc:''}; if(base.err) return base;
+    const hit=nearSet(sa,d,a=>base.test(a)&&!src.test(a));
+    return {test:a=>hit.has(a._rk)&&base.test(a)&&!src.test(a), desc:`${base.desc?base.desc+' ':'residues '}within ${d} Å of ${src.desc}`}; }
+  m=t.match(/^(?:binding (?:site|pocket)|pocket|active site|ligand pocket)(?:\s+(?:of|for|around)\s+(.+))?$/i);
+  if(m){ const src=m[1]?parseSel(m[1]):{test:a=>a._cls==='ligand',desc:'the ligands'}; if(src.err) return src; const sa=atomsIn(src); if(!sa.length) return {err:'There is no ligand to define a binding site around.'};
+    const hit=nearSet(sa,5,a=>POLY.has(a._cls)); return {test:a=>hit.has(a._rk)&&POLY.has(a._cls), desc:`binding site of ${src.desc}`, pocketOf:src}; }
+  m=t.match(/^interface(?:\s+(?:between|of))?\s+(.+?)\s+(?:and|with|vs\.?)\s+(.+)$/i)||t.match(/^(.+?)\s+(?:interface)$/i);
+  if(m && m[2]){ const A=parseSel(m[1]),B=parseSel(m[2]); if(A.err) return A; if(B.err) return B; const ha=nearSet(atomsIn(B),5,a=>A.test(a)), hb=nearSet(atomsIn(A),5,a=>B.test(a)); return {test:a=>(ha.has(a._rk)&&A.test(a))||(hb.has(a._rk)&&B.test(a)), desc:`interface between ${A.desc} and ${B.desc}`}; }
+  if(/^interface$/i.test(t)){ const hit=new Set(); for(const M of S.models){ const cs=[...M.chains.values()].filter(c=>c.poly.length); for(const c of cs){ const others=M.atoms.filter(a=>a.chain!==c.id&&a._cls!=='water'); const h=nearSet(others,5,a=>a._m===M&&a.chain===c.id&&POLY.has(a._cls)); h.forEach(k=>hit.add(k)); } } return {test:a=>hit.has(a._rk)&&POLY.has(a._cls), desc:'chain interfaces'}; }
+  m=t.match(/^(.*?)\s+(?:except|but not|excluding|without|other than|apart from|not including|minus)\s+(.+)$/i);
+  if(m){ const A=parseSel(m[1]||'all'),B=parseSel(m[2]); if(A.err) return A; if(B.err) return B; return {test:a=>A.test(a)&&!B.test(a), desc:`${A.desc} except ${B.desc}`}; }
+  m=t.match(/^(?:not|non)[\s-]+(.+)$/i); if(m){ const B=parseSel(m[1]); if(B.err) return B; return {test:a=>a._cls!=='water'&&!B.test(a), desc:'not '+B.desc}; }
+  t=preprocessSel(t);
+  // intersection
+  let parts=t.split(/\s+(?:in|of|on|from|that are in|belonging to|within)\s+(?!contact)/i);
+  if(parts.length>1){ const ss=parts.map(p=>parseSel(p)); const bad=ss.find(s=>s.err); if(bad) return bad; return {test:a=>ss.every(s=>s.test(a)), desc:ss.map(s=>s.desc).join(' in ')}; }
+  // union
+  parts=t.split(/\s*(?:,|\band\b|\bor\b|\bplus\b|\+|&)\s*/i).filter(Boolean);
+  if(parts.length>1){ const ss=parts.map(p=>parseSel(p)); const bad=ss.find(s=>s.err); if(bad) return bad; return {test:a=>ss.some(s=>s.test(a)), desc:ss.map(s=>s.desc).join(' and ')}; }
+  // conjunction of simple space-separated terms ("chain=A resi=10-20", "hydrophobic residues")
+  const terms=tokenizeTerms(t);
+  if(terms.err) return terms;
+  if(terms.length===1) return terms[0];
+  return {test:a=>terms.every(s=>s.test(a)), desc:terms.map(s=>s.desc).join(' ')};
+}
+function tokenizeTerms(t){
+  const out=[]; let rest=t.trim();
+  const chains=chainIds(), resns=allResn();
+  const fillers=/^(?:the|a|an|all|any|every|residues?|atoms?|amino acids?|aa|parts?|regions?|segments?|portions?|bits?|ones?|molecules?|groups?|side|please|just|only|entire|whole|me|of)$/i;
+  const words=rest.split(/\s+/);
+  for(let i=0;i<words.length;i++){
+    let w=words[i]; const lw=w.toLowerCase();
+    if(fillers.test(w)) continue;
+    let m;
+    if((m=w.match(/^chain=(.+)$/i))){ const ids=m[1].split('|'); const set=new Set(ids.map(x=>chains.has(x)?x:([...chains].find(c=>c.toLowerCase()===x.toLowerCase())||x))); const miss=[...set].filter(x=>!chains.has(x)); if(miss.length===set.size) return {err:`There is no chain ${[...set].join(', ')}. Chains here: ${[...chains].join(', ')}.`}; out.push({test:a=>set.has(a.chain), desc:'chain '+[...set].join('+')}); continue; }
+    if((m=w.match(/^resi=(.+)$/i))){ const rs=parseRanges(m[1]); out.push({test:a=>rs.some(([lo,hi])=>a.resi>=lo&&a.resi<=hi), desc:'residues '+m[1].replace(/\|/g,', ')}); continue; }
+    if(/^model$/i.test(w) && words[i+1]){ const id=words[++i]; const M=S.models.find(M=>String(M.id)===id.replace('#',''))||S.models.find(M=>M.name.toLowerCase().includes(id.toLowerCase())); if(!M) return {err:`There is no model ${id}.`}; out.push({test:a=>a._m===M, desc:`model ${M.id}`}); continue; }
+    if((m=w.match(/^#(\d+)$/))){ const M=S.models.find(M=>M.id===+m[1]); if(!M) return {err:`There is no model #${m[1]}.`}; out.push({test:a=>a._m===M,desc:`model ${M.id}`}); continue; }
+    // pLDDT thresholds
+    const span=words.slice(i).join(' ').toLowerCase();
+    if((m=span.match(/^(?:plddt|confidence|b-?factors?|b)\s*(<=|>=|<|>|=<|=>|below|above|under|over|less than|greater than|more than|lower than|higher than)\s*(\d+(?:\.\d+)?)/))){
+      const op=m[1], v=+m[2]; const lt=/<|below|under|less|lower/.test(op); const isB=/^b/.test(span);
+      out.push({test:a=>{ const p=isB?a.b:plddtOf(a); return p!=null && (lt?p<v:p>v); }, desc:`${isB?'B-factor':'pLDDT'} ${lt?'<':'>'} ${v}`}); i+=m[0].split(/\s+/).length-1; continue; }
+    if((m=span.match(/^(very low|low|lowest|poor|uncertain|very high|high|highest|good|confident|disordered|ordered|unstructured|well[- ]predicted|badly predicted|poorly predicted)(?:[- ]confidence| plddt| quality)?(?:\s+(?:regions?|residues?|parts?))?/))){
+      const k=m[1].replace(/[- ]/g,' '); let f,d;
+      if(/very low|disordered|unstructured/.test(k)){f=p=>p<50;d='pLDDT < 50';}
+      else if(/low|poor|uncertain|badly|poorly/.test(k)){f=p=>p<70;d='pLDDT < 70';}
+      else if(/very high|highest/.test(k)){f=p=>p>=90;d='pLDDT ≥ 90';}
+      else {f=p=>p>=70;d='pLDDT ≥ 70';}
+      if(!S.models.some(M=>M.plddt)) return {err:'No loaded model carries pLDDT scores, so confidence-based selections do not apply. Load a predicted model, or say “treat B-factor as pLDDT”.'};
+      out.push({test:a=>{const p=plddtOf(a);return p!=null&&POLY.has(a._cls)&&f(p);}, desc:d}); i+=m[0].split(/\s+/).length-1; continue; }
+    if((m=span.match(/^(first|last)\s+(\d+)/))){ const n=+m[2], first=m[1]==='first'; out.push({test:a=>a._r.nchain!=null&&(first?a._r.ri<n:a._r.ri>=a._r.nchain-n), desc:`${m[1]} ${n} residues`}); i+=2; continue; }
+    if(/^(n[- ]?term(?:inus|inal)?|start)$/i.test(w)){ out.push({test:a=>a._r.ri!=null&&a._r.ri<5,desc:'N-terminus'}); continue; }
+    if(/^(c[- ]?term(?:inus|inal)?|end)$/i.test(w)){ out.push({test:a=>a._r.ri!=null&&a._r.ri>=a._r.nchain-5,desc:'C-terminus'}); continue; }
+    const kw=keywordSel(lw, words[i+1]?.toLowerCase());
+    if(kw){ out.push(kw.sel); if(kw.eat) i++; continue; }
+    // amino acid full names
+    const aname=lw.replace(/s$/,''); if(AA_NAMES[aname]||AA_NAMES[lw]){ const rn=AA_NAMES[aname]||AA_NAMES[lw]; out.push({test:a=>a._r.resn===rn, desc:rn}); continue; }
+    if(lw==='aspartic'||lw==='glutamic'){ const rn=lw==='aspartic'?'ASP':'GLU'; out.push({test:a=>a._r.resn===rn,desc:rn}); if(/^acids?$/i.test(words[i+1]||'')) i++; continue; }
+    // residue name + number, e.g. his57, HIS 57, K48
+    if((m=w.match(/^([A-Za-z]{3})(\d+)$/)) && AA[m[1].toUpperCase()]){ const rn=m[1].toUpperCase(), n=+m[2]; out.push({test:a=>a._r.resn===rn&&a.resi===n, desc:rn+n}); continue; }
+    if(AA[w.toUpperCase()] && /^\d+$/.test(words[i+1]||'')){ const rn=w.toUpperCase(), n=+words[i+1]; i++; out.push({test:a=>a._r.resn===rn&&a.resi===n, desc:rn+n}); continue; }
+    if((m=w.match(/^([A-Za-z])(\d+)$/))){
+      const L=m[1], n=+m[2];
+      const asChain=chains.has(L) && S.models.some(M=>[...M.residues].some(r=>r.chain===L&&r.resi===n));
+      if(asChain){ out.push({test:a=>a.chain===L&&a.resi===n, desc:`${L}${n}`}); continue; }
+      const rn=ONE2THREE[L.toUpperCase()]; if(rn){ out.push({test:a=>a._r.resn===rn&&a.resi===n, desc:rn+n}); continue; }
+    }
+    if(/^\d+[a-z]?$/i.test(w)){ const n=parseInt(w); out.push({test:a=>a.resi===n, desc:'residue '+n}); continue; }
+    // ligand / residue names present in the structure
+    const W=w.toUpperCase().replace(/S$/,''); if(resns.has(w.toUpperCase())){ const rn=w.toUpperCase(); out.push({test:a=>a._r.resn===rn, desc:rn}); continue; }
+    if(W.length>=2 && resns.has(W) && !AA[W]){ out.push({test:a=>a._r.resn===W, desc:W}); continue; }
+    if(AA[w.toUpperCase()]){ const rn=w.toUpperCase(); out.push({test:a=>a._r.resn===rn, desc:rn}); continue; }
+    if(AA[W]){ out.push({test:a=>a._r.resn===W,desc:W}); continue; }
+    if(chains.has(w) && w.length<=2){ out.push({test:a=>a.chain===w, desc:'chain '+w}); continue; }
+    if(w.length===1 && [...chains].some(c=>c.toLowerCase()===lw)){ const c=[...chains].find(c=>c.toLowerCase()===lw); out.push({test:a=>a.chain===c,desc:'chain '+c}); continue; }
+    return {err:`I couldn't tell what “${w}” refers to.`, unknown:true};
+  }
+  if(!out.length) return [ALL];
+  return out;
+}
+function keywordSel(w,next){
+  const S1=(test,desc,eat)=>({sel:{test,desc},eat});
+  switch(w){
+    case 'protein': case 'proteins': case 'peptide': case 'peptides': case 'polypeptide': return S1(a=>a._cls==='protein','protein');
+    case 'dna': return S1(a=>a._cls==='dna','DNA');
+    case 'rna': return S1(a=>a._cls==='rna','RNA');
+    case 'nucleic': case 'nucleotides': return S1(a=>a._cls==='dna'||a._cls==='rna','nucleic acid', next&&/^acids?$/.test(next));
+    case 'polymer': case 'polymers': case 'macromolecule': case 'macromolecules': case 'chains': return S1(a=>POLY.has(a._cls),'polymer chains');
+    case 'ligand': case 'ligands': case 'drug': case 'drugs': case 'inhibitor': case 'inhibitors': case 'compound': case 'compounds': case 'small': case 'cofactor': case 'cofactors': case 'substrate': case 'fragment': case 'fragments': case 'hetero': case 'het': case 'hetatm': case 'hetatms':
+      return S1(a=>a._cls==='ligand','ligands', next&&/^(molecules?)$/.test(next));
+    case 'glycan': case 'glycans': case 'sugar': case 'sugars': case 'carbohydrates': case 'glycosylation': case 'nag': return S1(a=>a._cls==='glycan','glycans');
+    case 'water': case 'waters': case 'solvent': case 'hoh': return S1(a=>a._cls==='water','water');
+    case 'ion': case 'ions': case 'metal': case 'metals': case 'metal ions': return S1(a=>a._cls==='ion','ions', next&&/^ions?$/.test(next));
+    case 'zinc': return S1(a=>a._cls==='ion'&&a.elem.toUpperCase()==='ZN','zinc');
+    case 'magnesium': return S1(a=>a._cls==='ion'&&a.elem.toUpperCase()==='MG','magnesium');
+    case 'calcium': return S1(a=>a._cls==='ion'&&a.elem.toUpperCase()==='CA','calcium');
+    case 'sodium': return S1(a=>a._cls==='ion'&&a.elem.toUpperCase()==='NA','sodium');
+    case 'iron': return S1(a=>a.elem.toUpperCase()==='FE','iron');
+    case 'backbone': case 'mainchain': return S1(a=>['N','CA','C','O',"P","O3'","O5'","C3'","C4'","C5'"].includes(a.atom),'backbone');
+    case 'sidechain': case 'sidechains': case 'side-chains': case 'side-chain': return S1(a=>a._cls==='protein'&&!['N','C','O'].includes(a.atom),'side chains');
+    case 'side': if(next&&/^chains?$/.test(next)) return S1(a=>a._cls==='protein'&&!['N','C','O'].includes(a.atom),'side chains',true); return null;
+    case 'helix': case 'helices': case 'helical': case 'alpha': return S1(a=>POLY.has(a._cls)&&a.ss==='h','helices', next&&/^(helix|helices)$/.test(next));
+    case 'sheet': case 'sheets': case 'strand': case 'strands': case 'beta': return S1(a=>POLY.has(a._cls)&&a.ss==='s','β-strands', next&&/^(sheets?|strands?)$/.test(next));
+    case 'loop': case 'loops': case 'coil': case 'coils': return S1(a=>a._cls==='protein'&&a.ss!=='h'&&a.ss!=='s','loops');
+    case 'hydrophobic': case 'apolar': case 'nonpolar': return S1(a=>SETS.hydrophobic.includes(a._r.resn),'hydrophobic residues');
+    case 'polar': return S1(a=>SETS.polar.includes(a._r.resn),'polar residues');
+    case 'charged': return S1(a=>SETS.charged.includes(a._r.resn),'charged residues');
+    case 'positive': case 'basic': case 'positively': return S1(a=>SETS.positive.includes(a._r.resn),'basic residues', next&&/^charged$/.test(next));
+    case 'negative': case 'acidic': case 'negatively': return S1(a=>SETS.negative.includes(a._r.resn),'acidic residues', next&&/^charged$/.test(next));
+    case 'aromatic': case 'aromatics': return S1(a=>SETS.aromatic.includes(a._r.resn),'aromatic residues');
+    case 'cysteines': case 'disulfides': case 'disulphides': case 'disulfide': return S1(a=>a._r.resn==='CYS','cysteines', next&&/^(bonds?|bridges?)$/.test(next));
+    case 'carbons': case 'carbon': return S1(a=>a.elem==='C','carbon atoms');
+    case 'oxygens': case 'oxygen': return S1(a=>a.elem==='O','oxygen atoms');
+    case 'nitrogens': case 'nitrogen': return S1(a=>a.elem==='N','nitrogen atoms');
+    case 'sulfurs': case 'sulfur': case 'sulphur': return S1(a=>a.elem==='S','sulfur atoms');
+    case 'ca': case 'calpha': case 'c-alpha': case 'alpha-carbons': return S1(a=>a.atom==='CA'&&a._cls==='protein','Cα atoms');
+    case 'hydrogens': case 'hydrogen': return S1(a=>a.elem==='H','hydrogens');
+    case 'visible': case 'shown': case 'displayed': return S1(a=>a._rep>0,'visible atoms');
+    case 'hidden': return S1(a=>a._rep===0&&a._cls!=='water','hidden atoms');
+    case 'everything': case 'all': case 'structure': case 'complex': return S1(ALL.test,'everything');
+  }
+  return null;
+}
+
+/* ============================== command language ============================== */
+const REP_WORDS = [
+  [/\bball[- ]?(?:and|&|n)[- ]?sticks?\b/i, REP.BS, 'ball-and-stick'],
+  [/\b(?:cartoons?|ribbons?|secondary structure cartoon)\b/i, REP.CARTOON, 'cartoon'],
+  [/\b(?:traces?|tubes?|worms?|backbone trace|ca trace)\b/i, REP.TRACE, 'trace'],
+  [/\b(?:sticks?|licorice|bonds)\b/i, REP.STICK, 'sticks'],
+  [/\b(?:spheres?|spacefill(?:ing)?|space[- ]filling|cpk|vdw|van der waals|balls?)\b/i, REP.SPHERE, 'spheres'],
+  [/\b(?:lines?|wires?|wireframe)\b/i, REP.LINE, 'lines'],
+];
+function findRep(t){ let rep=0, names=[]; let s=t; for(const [re,bit,name] of REP_WORDS){ if(re.test(s)){ rep|=bit; names.push(name); s=s.replace(re,' '); } } return {rep,names,rest:s}; }
+function findColor(t){
+  const hx=t.match(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/i); if(hx) return {col:parseColor(hx[0]), word:hx[0], rest:t.replace(hx[0],' ')};
+  const lw=t.toLowerCase();
+  for(const pre of ['light ','dark ','pale ','bright ','deep ','']){
+    for(const c of COLOR_WORDS){ const re=new RegExp('\\b'+pre+c+'\\b','i'); if(re.test(lw)){ const word=(pre+c).replace(/\s+/g,''); let v=parseColor(word); if(v==null) v=parseColor(c); if(v!=null){ if(pre==='light '||pre==='pale ') v=mixCol(v,0xffffff,.45); if(pre==='dark '||pre==='deep ') v=mixCol(v,0x000000,.4); return {col:v,word:pre+c,rest:t.replace(re,' ')}; } } }
+  }
+  return null;
+}
+const SCHEMES = [
+  [/\b(?:plddt|confidence|alphafold|predicted|reliability)\b/i,'plddt','pLDDT'],
+  [/\b(?:pae|predicted aligned error|aligned error)\b/i,'pae','PAE'],
+  [/\b(?:b-?factors?|temperature|bfac|disorder|mobility|flexibility|b values?)\b/i,'b','B-factor'],
+  [/\b(?:rainbow|spectrum|n[- ]?to[- ]?c|position|sequence position|index)\b/i,'rainbow','N→C rainbow'],
+  [/\b(?:secondary structures?|ss|dssp|helix and sheet)\b/i,'ss','secondary structure'],
+  [/\b(?:hydrophobicity|hydropathy|hydrophobic)\b/i,'hydro','hydrophobicity'],
+  [/\b(?:residue types?|residue property|properties|charge|amino acid type|chemistry|polarity)\b/i,'restype','residue type'],
+  [/\b(?:elements?|atom types?|atoms|cpk|heteroatoms?)\b/i,'element','element'],
+  [/\b(?:models?|structures?|files?)\b/i,'model','model'],
+  [/\b(?:chains?|subunits?|entit(?:y|ies)|molecules?)\b/i,'chain','chain'],
+];
+function splitClauses(raw){
+  const verbs='show|hide|display|colou?r|paint|zoom|focus|center|centre|label|highlight|make|measure|add|remove|delete|spin|rotate|align|superpose|superimpose|surface|reset|turn|set|isolate|select|then|draw|render|find|list|count|export|save|stop';
+  return raw.split(new RegExp(`\\s*(?:;|\\n|\\.\\s+(?=[A-Za-z])|,?\\s+(?:and\\s+)?then\\s+|,\\s*(?=(?:${verbs})\\b)|\\s+and\\s+(?=(?:also\\s+)?(?:${verbs})\\b))\\s*`,'i')).map(s=>s.trim()).filter(Boolean);
+}
+function expandCompound(c){
+  let m=c.match(/^((?:only\s+)?(?:show|display|render|draw|make))\s+(.+?\bas\s+(?:a\s+)?[\w-]+(?:\s+(?:and|&|n)\s+sticks?)?)\s*(?:,|\band\b)\s+(.+\bas\s+.+)$/i);
+  if(m) return [m[1]+' '+m[2], ...expandCompound('show '+m[3])];
+  const cw='(?:#[0-9a-f]{3,6}|(?:light |dark |pale |bright |deep )?(?:'+COLOR_WORDS.join('|')+'))';
+  m=c.match(new RegExp('^(colou?r|paint|make)\\s+(.+?\\s+'+cw+')\\s*(?:,|\\band\\b)\\s+(.+\\s+'+cw+')$','i'));
+  if(m) return [m[1]+' '+m[2], ...expandCompound(m[1]+' '+m[3])];
+  return [c];
+}
+function runText(raw, opts={}){
+  const clauses=splitClauses(raw).flatMap(expandCompound); const results=[];
+  for(const c of clauses){ let r; try{ r=execClause(c); }catch(e){ r={ok:false,msg:'That failed: '+(e.message||e)}; console.error(e); } results.push({clause:c,...r}); if(r.unknown && !opts.continueOnUnknown) break; }
+  renderStyles();
+  refreshPanels();
+  return results;
+}
+function needModel(){ if(!S.models.length) return {ok:false,msg:'Load a structure first: drop a file, fetch an ID, or pick a sample.'}; return null; }
+function stripWords(t, ...res){ for(const re of res) t=t.replace(re,' '); return t.replace(/\s+/g,' ').trim(); }
+const FILLER=/\b(?:please|can you|could you|would you|i want to|i'd like to|i want|let's|lets|let me|now|also|just|kindly|go ahead and|try to|me)\b/gi;
+
+function execClause(clause){
+  let t=clause.trim().replace(/[!?]+$/,'').trim();
+  let low=t.toLowerCase().replace(FILLER,' ').replace(/\s+/g,' ').trim();
+  const body=t.replace(FILLER,' ').replace(/\s+/g,' ').trim();
+  if(!low) return {ok:true,msg:''};
+  if(/^(help|commands|what can (you|i) do|examples?)\b/.test(low)){ openTab('p-help'); return {ok:true,msg:'Opened the command guide in the Commands tab.'}; }
+  if(/^(fetch|load|open|download)\s+([0-9][a-z0-9]{3}|af-[a-z0-9]+|[opq][0-9][a-z0-9]{3}[0-9]|[a-nr-z][0-9][a-z0-9]{3}[0-9](?:[a-z0-9]{4})?)$/i.test(body)){ fetchById(body.split(/\s+/)[1]); return {ok:true,msg:''}; }
+  if(/\b(load|open)\s+(?:a\s+)?sample\b|^sample\b/.test(low)){ const f=/dna|1lcd|repressor/.test(low)?'1LCD.pdb':/ace2|7ddo|rbd|spike|complex/.test(low)?'7DDO.pdb':'4CUP.cif'; loadSample(f); return {ok:true,msg:''}; }
+  const nm=needModel(); if(nm) return nm;
+  const M0=S.models[S.active];
+
+  if(/^(reset|start over|restore|default (view|style)|clear all|revert|undo everything)\b/.test(low)) return doReset();
+  if(/\b(stop|pause|halt|freeze)\b.*\b(spin|spinning|rotat\w*|turning|moving)\b|\b(spin|rotation|rotate)\s+off\b|^stop$/.test(low)){ S.viewer.spin(false); S.spinning=false; return {ok:true,msg:'Stopped spinning.'}; }
+  let m;
+  if((m=low.match(/\brotate\b.*?(?:by\s+)?(-?\d+)\s*(?:°|deg(?:rees?)?)?\s*(?:around|about|on|along)?\s*(?:the\s+)?([xyz])?(?:[- ]axis)?/))){ const ax=m[2]||'y'; S.viewer.rotate(+m[1],ax); return {ok:true,msg:`Rotated ${m[1]}° about ${ax}.`}; }
+  if(/\b(spin|rotate|turn(?:ing)?|revolve|animate)\b/.test(low) && !/\bturn\s+(on|off)\b/.test(low)){ const ax=(low.match(/\b([xyz])\b(?:[- ]axis)?/)||[])[1]||'y'; S.viewer.spin(ax,0.6); S.spinning=true; return {ok:true,msg:`Spinning about ${ax}. Say “stop spinning” to stop.`}; }
+  if(/\b(background|bg|backdrop)\b/.test(low)){ const c=findColor(low); if(!c) { if(/default|reset|theme/.test(low)){ S.viewer.setBackgroundColor(cssVar('--stage')); S.viewer.render(); return {ok:true,msg:'Background follows the theme again.'}; } return {ok:false,msg:'Which colour? For example “background black”.'}; } S.viewer.setBackgroundColor(hex(c.col)); S.viewer.render(); return {ok:true,msg:`Background set to ${c.word}.`}; }
+  if(/\b(clear|remove|delete|hide|erase|get rid of)\b.*\b(labels?|measurements?|distances?|contacts?|lines?|annotations?|h-?bonds?|interactions?|dashes)\b/.test(low)){ const L=/labels?|annotations?/.test(low), D=/measure|distance|contact|line|bond|interaction|dash/.test(low); if(L||!D) clearLabels(); if(D||!L) clearShapes(); S.viewer.render(); return {ok:true,msg:`Cleared ${L&&!D?'labels':D&&!L?'measurements and contact lines':'labels and measurements'}.`}; }
+  if(/\b(remove|hide|delete|clear|no|turn off|get rid of)\b.*\bsurfaces?\b|\bsurfaces?\s+off\b/.test(low)){ clearSurfaces(); return {ok:true,msg:'Removed surfaces.'}; }
+  if(/\btreat\b.*\b(b-?factors?|b column)\b.*\b(as\s+)?plddt\b|\b(b-?factors?)\s+(?:is|are)\s+plddt\b/.test(low)){ M0.plddt=true; M0.plddtScale=M0.bmax<=1?100:1; M0.kind='predicted'; M0.source=M0.source||'Predicted model'; for(const a of M0.atoms) if(POLY.has(a._cls)) a._col='plddt'; return {ok:true,msg:`Reading ${M0.name}'s B-factor column as pLDDT.`}; }
+
+  if(/\btreat\b.*\b(as\s+)?(experimental|crystal|not (a )?predict)/.test(low)){ M0.plddt=false; M0.kind='experimental'; M0.source=null; for(const a of M0.atoms) if(a._col==='plddt') a._col='chain'; return {ok:true,msg:`Treating ${M0.name} as an experimental structure (B-factor, not pLDDT).`}; }
+  if(/\b(align|superpose|superimpose|overlay|overlap|fit|compare)\b/.test(low)) return doAlign(low);
+  if(/\b(export|save|download|write)\b/.test(low)) return doExport(low, body);
+  if(/\b(distance|measure|how far)\b/.test(low)) return doMeasure(body);
+  if(/\b(contacts?|interactions?|h-?bonds?|hydrogen bonds?|polar contacts|salt bridges?|interacting|interacts)\b/.test(low) && !/\bcolou?r\b/.test(low)) return doContacts(body);
+  if(/\b(translate|move|shift|nudge)\b/.test(low)) return doTranslate(body);
+  // questions answered from the data
+  if(/^(how many|count|what|which|list|tell me|info|information|summary|summari[sz]e|describe|average|mean|is there|are there|where|who|sequence|get sequence|print|report|give me)\b/.test(low) || /\bsequence\b/.test(low) && !/\b(colou?r|show|hide)\b/.test(low)){ const q=doQuery(low, body); if(q) return q; return {ok:false,unknown:true,msg:'I can only answer counts, lists, sequences and confidence summaries on my own. Switch to Claude for open questions.'}; }
+  if(/\b(colou?r|paint|shade|tint)\b.*\bby\b|\b(colou?r|paint)\s+(?:it\s+|them\s+)?(?:as\s+)?(?:a\s+)?(rainbow|spectrum)\b/.test(low)) return doColorScheme(body,low);
+  if(/\b(transparen\w*|opacity|opaque|see[- ]through|translucent)\b/.test(low) && !/\bsurface\b/.test(low)) return doOpacity(low);
+  if(/\bsurfaces?\b/.test(low)) return doSurface(body,low);
+  if(/\b(unlabel|clear label)\b/.test(low)){ clearLabels(); S.viewer.render(); return {ok:true,msg:'Cleared labels.'}; }
+  if(/\b(label|name|annotate|tag)\b/.test(low)) return doLabel(body);
+  if(/\bzoom\s+out\b/.test(low)){ S.viewer.zoom(0.7,300); return {ok:true,msg:'Zoomed out.'}; }
+  if(/\bzoom\s+in\b$/.test(low)){ S.viewer.zoom(1.4,300); return {ok:true,msg:'Zoomed in.'}; }
+  if(/\b(zoom|focus|center|centre|go to|look at|fly to|frame|fit)\b/.test(low)) return doZoom(body);
+  if(/\b(highlight|emphasi[sz]e|mark|spotlight|point out|indicate)\b/.test(low)) return doHighlight(body);
+  if(/\b(delete|remove|strip|discard|get rid of|eliminate|drop)\b/.test(low)) return doDelete(body);
+  if(/\b(hide|conceal|turn off|don't show|do not show|invisible|disable)\b/.test(low)) return doHide(body);
+  const rep=findRep(low);
+  const col=findColor(low);
+  if(/\b(colou?r|paint|tint|make|turn|set)\b/.test(low) && col && !rep.rep) return doColorSolid(body,col);
+  if(/\b(only|isolate|just show|show only|nothing but|exclusively)\b/.test(low)) return doShow(body,{only:true});
+  if(/\b(show|display|render|draw|view|add|make|turn on|visuali[sz]e|see|reveal|bring back|unhide)\b/.test(low) || rep.rep) return doShow(body,{});
+  if(col) return doColorSolid(body,col);
+  // A bare selection: treat as "highlight"
+  const sel=parseSel(body); if(!sel.err && sel!==ALL) return doHighlight(body);
+  return {ok:false, unknown:true, msg:`I didn't understand “${clause}”.`};
+}
+function selRest(body, extra=[]){
+  let t=body;
+  t=t.replace(/\b(?:as|in|with|using|into|to)\s+(?:a\s+|an\s+)?(?:ball[- ]?(?:and|&|n)[- ]?sticks?|cartoons?|ribbons?|traces?|tubes?|sticks?|licorice|spheres?|spacefill(?:ing)?|cpk|vdw|lines?|wires?|wireframe)(?:\s+(?:representation|style|mode|form))?/gi,' ');
+  for(const [re] of REP_WORDS) t=t.replace(re,' ');
+  const c=findColor(t); if(c){ t=t.replace(new RegExp('\\b(?:in|to|as|with)?\\s*'+c.word.replace(/[#]/g,'\\#')+'\\b','i'),' '); }
+  for(const re of extra) t=t.replace(re,' ');
+  t=t.replace(/\b(?:show|display|render|draw|view|add|make|turn on|visuali[sz]e|see|reveal|bring back|unhide|hide|conceal|turn off|colou?r(?:ed|ize)?|paint|tint|shade|highlight|emphasi[sz]e|mark|spotlight|zoom(?: in)?(?: on| to| into)?|focus(?: on)?|center(?: on)?|centre(?: on)?|go to|look at|fly to|frame|label|annotate|delete|remove|strip|discard|get rid of|eliminate|isolate|only|just|nothing but|exclusively|representation|style|mode|form|them|please|it's|its|the view|view)\b/gi,' ');
+  t=t.replace(/^\s*(?:the|me|to|on|in|as|of|for)\s+/i,'').replace(/\s+(?:as|in|with|to|for|on)\s*$/i,'');
+  t=t.replace(/\s+/g,' ').trim();
+  return t;
+}
+function resolveSel(body, extra, fallbackPronoun=true){
+  const text=selRest(body,extra);
+  if(!text) return fallbackPronoun && /\b(it|them|those|these|that|this)\b/i.test(body) && S.lastSel ? S.lastSel : ALL;
+  const sel=parseSel(text);
+  return sel;
+}
+function countRes(sel){ return residuesIn(sel).length; }
+function remember(sel){ if(sel && sel!==ALL) S.lastSel=sel; }
+function plural(n,w){ return `${n} ${w}${n===1?'':'s'}`; }
+
+function doShow(body,{only}){
+  const rep=findRep(body.toLowerCase());
+  const sel=resolveSel(body); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  const atoms=atomsIn(sel.test===ALL.test&&/water/i.test(body)?{test:a=>a._cls==='water'}:sel);
+  if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  const replace = /\bas\b/i.test(body) || only;
+  if(only) for(const a of allAtoms()) if(!sel.test(a)) a._rep=0;
+  const nres=new Set(atoms.map(a=>a._rk)).size;
+  const whole = atoms.length && atoms.every(a=>POLY.has(a._cls)) && nres>40;
+  for(const a of atoms){
+    let r=rep.rep;
+    if(!r){ r = POLY.has(a._cls) ? (whole||a._rep&REP.CARTOON&&nres>40 ? REP.CARTOON : (REP.CARTOON|REP.STICK)) : a._cls==='ion'?REP.SPHERE : a._cls==='water'?REP.BS : REP.STICK;
+      if(!POLY.has(a._cls)) { a._rep = a._rep||r; continue; } a._rep|=r; continue; }
+    if((r===REP.CARTOON||r===REP.TRACE) && !POLY.has(a._cls)) continue; // cartoon means nothing for ligands
+    a._rep = replace ? r : (a._rep|r);
+  }
+  const c=findColor(body);
+  if(c) for(const a of atoms) a._col=hex(c.col);
+  remember(sel);
+  return {ok:true,msg:`${only?'Showing only':'Showing'} ${sel.desc}${rep.names.length?' as '+rep.names.join(' + '):''} (${plural(nres,'residue')}).`};
+}
+function doHide(body){
+  const rep=findRep(body.toLowerCase());
+  const sel=resolveSel(body); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  const atoms=atomsIn(sel.test===ALL.test&&/water/i.test(body)?{test:a=>a._cls==='water'}:sel);
+  if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  for(const a of atoms) a._rep = rep.rep ? (a._rep & ~rep.rep) : 0;
+  return {ok:true,msg:`Hid ${rep.names.length?rep.names.join(' + ')+' for ':''}${sel.desc}.`};
+}
+function doDelete(body){
+  const sel=resolveSel(body); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  if(sel===ALL) return {ok:false,msg:'Say what to delete, for example “delete waters” or “remove chain B”. To drop a whole model use the × on its card.'};
+  let n=0;
+  for(const M of S.models){ const bad=M.atoms.filter(sel.test); if(!bad.length) continue; n+=bad.length; M.model.removeAtoms(bad); buildIndex(M); setClickable(M); }
+  clearSurfaces(true);
+  buildEntities();
+  return n?{ok:true,msg:`Deleted ${plural(n,'atom')} (${sel.desc}). Export the structure to keep the edited file.`}:{ok:false,msg:`Nothing matched ${sel.desc}.`};
+}
+function doColorSolid(body,col){
+  const sel=resolveSel(body); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  const atoms=atomsIn(sel); if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  for(const a of atoms) a._col=hex(col.col);
+  remember(sel);
+  return {ok:true,msg:`Coloured ${sel.desc} ${col.word} (${plural(new Set(atoms.map(a=>a._rk)).size,'residue')}).`};
+}
+function doColorScheme(body,low){
+  let scheme=null,name='';
+  const after=(body.match(/\bby\s+(.+)$/i)||[])[1]||body;
+  for(const [re,k,n] of SCHEMES){ if(re.test(after)){ scheme=k; name=n; break; } }
+  if(/\b(rainbow|spectrum)\b/.test(low)){ scheme='rainbow'; name='N→C rainbow'; }
+  if(!scheme) return {ok:false,msg:'I know these colour schemes: chain, pLDDT, PAE, B-factor, rainbow, secondary structure, hydrophobicity, residue type, element and model.'};
+  let selText=body.replace(/\bby\s+.+$/i,'').replace(/\b(colou?r|paint|shade|tint)\b/ig,' ').replace(/\b(rainbow|spectrum)\b/ig,' ').trim();
+  const sel=selText?parseSel(selRest(selText)):ALL; if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  if(scheme==='plddt' && !S.models.some(M=>M.plddt)) return {ok:false,msg:'None of the loaded models has pLDDT scores. Load a predicted model (AlphaFold, Boltz, Chai-1…) or say “treat B-factor as pLDDT”.'};
+  if(scheme==='pae'){
+    const M=S.models.find(M=>M.pae&&M.pae.tokens) ; if(!M) return {ok:false,msg:'PAE needs a predicted model with its PAE file attached (AlphaFold DB JSON, AF3 full_data JSON, ColabFold scores JSON or Boltz pae NPZ).'};
+    const refm=after.match(/(?:relative to|from|vs\.?|versus|against|to|of)\s+(.+)$/i);
+    let ref=null;
+    if(refm){ const rs=residuesIn(parseSel(refm[1])).filter(r=>r.M===M); if(rs.length) ref=rs; }
+    if(!ref) return {ok:false,msg:'Say which residue or region to measure PAE from, e.g. “colour by PAE relative to residue 50” or “… relative to chain B”.'};
+    setPaeRef(M,ref, refm[1]);
+    for(const a of M.atoms) a._col='pae';
+    return {ok:true,msg:`Coloured ${M.name} by expected position error relative to ${refm[1]} (blue = confident placement, red = uncertain).`};
+  }
+  const atoms=atomsIn(sel); for(const a of atoms){ if(scheme==='plddt'&&!a._m.plddt) continue; a._col = (scheme==='chain'&&(a._cls==='ligand'||a._cls==='glycan')&&sel===ALL)?'ligand':scheme; }
+  return {ok:true,msg:`Coloured ${sel.desc} by ${name}.`};
+}
+function setPaeRef(M,refRes,label){
+  const toks=M.pae.tokens, mat=M.pae.matrix; const refIdx=[]; const set=new Set(refRes.map(r=>r.key));
+  toks.forEach((r,i)=>{ if(r&&set.has(r.key)) refIdx.push(i); });
+  const vals=new Map(); const acc=new Map();
+  toks.forEach((r,j)=>{ if(!r) return; let s=0; for(const i of refIdx) s+=mat[i][j]; const v=s/refIdx.length; const e=acc.get(r.key)||[0,0]; e[0]+=v; e[1]++; acc.set(r.key,e); });
+  for(const [k,[s,n]] of acc) vals.set(k,s/n);
+  S.paeRef={vals,max:M.pae.max||30,ref:refRes.length===1?refRes[0].key:null,label};
+}
+function doOpacity(low){
+  const n=(low.match(/(\d+(?:\.\d+)?)\s*%?/)||[])[1];
+  let v = n!=null ? (+n>1?+n/100:+n) : (/\b(opaque|solid|no transparen)/.test(low)?1:0.5);
+  if(/\btransparen/.test(low) && n!=null && +n>1) v=1-(+n/100);
+  S.cartoonOpacity=Math.max(0.05,Math.min(1,v));
+  for(const s of S.surfaces) S.viewer.setSurfaceMaterialStyle(s.id,{opacity:S.cartoonOpacity});
+  return {ok:true,msg:`Opacity set to ${Math.round(S.cartoonOpacity*100)}%.`};
+}
+function doSurface(body,low){
+  const type = /\b(sas|solvent[- ]accessible)\b/.test(low)?'SAS': /\b(vdw|van der waals)\b/.test(low)?'VDW':'MS';
+  let scheme=null; for(const [re,k] of SCHEMES){ const by=low.match(/\b(?:by|colou?red by|coloured by)\s+(.+)$/); if(by&&re.test(by[1])){ scheme=k; break; } }
+  const col=findColor(low);
+  let opacity = /\btransparen|translucent|see[- ]through|ghost/.test(low)?0.55:0.9;
+  const on=low.match(/(\d+)\s*%/); if(on) opacity=+on[1]/100;
+  let selText=body.replace(/\b(?:colou?red|coloured)?\s*by\s+.+$/i,'').replace(/\b(?:molecular|solvent[- ]accessible|sas|vdw|van der waals|transparent|translucent|see[- ]through|ghost|opaque|\d+\s*%)\b/gi,' ').replace(/\bsurfaces?\b/ig,' ');
+  selText=selRest(selText);
+  let sel = selText? parseSel(selText) : {test:a=>POLY.has(a._cls), desc:'polymer chains'};
+  if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  if(sel===ALL) sel={test:a=>POLY.has(a._cls), desc:'polymer chains'};
+  const atoms=atomsIn(sel); if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  const map={};
+  for(const a of atoms){ let c; if(scheme){ const keep=a._col; a._col=scheme; c=colorOf(a); a._col=keep; } else if(col) c=col.col; else c=a.cc!=null?a.cc:colorOf(a); a.sc=String(c); map[a.sc]=c; }
+  for(const M of S.models){
+    const mine=atoms.filter(a=>a._m===M); if(!mine.length) continue;
+    const id=S.viewer.addSurface($3Dmol.SurfaceType[type], {opacity, colorscheme:{prop:'sc', map}}, {model:M.model, predicate:sel.test}, {model:M.model, predicate:sel.test});
+    S.surfaces.push({id});
+  }
+  S.viewer.render();
+  remember(sel);
+  return {ok:true,msg:`Added a ${type==='MS'?'molecular':type==='SAS'?'solvent-accessible':'van der Waals'} surface over ${sel.desc}${scheme?' coloured by '+scheme:col?' in '+col.word:''}.`};
+}
+function addLabel(key,text,pos,opt={}){
+  const dark=document.documentElement.getAttribute('data-theme')==='dark'||(!document.documentElement.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme: dark)').matches);
+  const obj=S.viewer.addLabel(text,{position:pos,fontSize:opt.size||12,fontColor:dark?'#ffffff':'#111111',backgroundColor:dark?'#1b242e':'#ffffff',backgroundOpacity:0.8,borderThickness:0,inFront:true,showBackground:true,alignment:'center',font:'IBM Plex Sans, sans-serif'});
+  S.labels.push({key,obj});
+}
+function clearLabels(){ for(const l of S.labels) S.viewer.removeLabel(l.obj); S.labels=[]; }
+function clearShapes(){ for(const s of S.shapes) S.viewer.removeShape(s); S.shapes=[]; }
+function clearSurfaces(silent){ S.viewer.removeAllSurfaces(); S.surfaces=[]; if(!silent) S.viewer.render(); }
+function doLabel(body){
+  const sel=resolveSel(body,[/\b(?:with\s+)?(?:their\s+)?names?\b/gi]); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  let res=residuesIn(sel===ALL?{test:a=>a._rep>0&&a._cls!=='water'}:sel);
+  if(!res.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  let note='';
+  if(res.length>80){ // too many: label ligands and every 10th residue
+    const ligs=res.filter(r=>!POLY.has(r.cls)); const poly=res.filter(r=>POLY.has(r.cls)&&r.resi%10===0); res=[...ligs,...poly]; note=' (every 10th residue, to keep it readable)'; }
+  for(const r of res){ if(!S.labels.some(l=>l.key===r.key)) addLabel(r.key,labelFor(r),r.center); }
+  S.viewer.render(); remember(sel);
+  return {ok:true,msg:`Labelled ${plural(res.length,'residue')}${note}.`};
+}
+function doZoom(body){
+  const sel=resolveSel(body,[/\b(?:in|out)\b/gi]); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  if(sel===ALL){ S.viewer.zoomTo({},600); return {ok:true,msg:'Zoomed to fit everything.'}; }
+  const atoms=atomsIn(sel); if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  zoomAtoms(atoms); remember(sel);
+  return {ok:true,msg:`Centred on ${sel.desc}.`};
+}
+function zoomAtoms(atoms){ const set=new Set(atoms); S.viewer.zoomTo({predicate:a=>set.has(a)},600); }
+function doHighlight(body){
+  const col=findColor(body);
+  const sel=resolveSel(body); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  if(sel===ALL) return {ok:false,msg:'Say what to highlight, e.g. “highlight residues 45–60” or “highlight the cysteines”.'};
+  const atoms=atomsIn(sel); if(!atoms.length) return {ok:false,msg:`Nothing matched ${sel.desc}.`};
+  const c=col?col.col:parseInt(cssVar('--accent').slice(1),16)||0xd0109b;
+  const nres=new Set(atoms.map(a=>a._rk)).size;
+  for(const a of atoms){ a._col=hex(c); if(POLY.has(a._cls)){ if(nres<=60) a._rep|=REP.STICK; a._rep|=REP.CARTOON; } else if(!a._rep) a._rep=a._cls==='ion'?REP.SPHERE:REP.STICK; }
+  if(nres<=12) for(const r of residuesIn(sel)) if(!S.labels.some(l=>l.key===r.key)) addLabel(r.key,labelFor(r),r.center);
+  zoomAtoms(atoms); remember(sel);
+  return {ok:true,msg:`Highlighted ${sel.desc} (${plural(nres,'residue')}).`};
+}
+function doReset(){
+  clearLabels(); clearShapes(); clearSurfaces(true); S.viewer.spin(false); S.cartoonOpacity=1; S.paeRef=null;
+  for(const M of S.models){ M.visible=true; for(const a of M.atoms){ a._rep = POLY.has(a._cls)?REP.CARTOON : a._cls==='water'?0 : a._cls==='ion'?REP.SPHERE:REP.STICK; a._col = (a._cls==='ligand'||a._cls==='glycan')?'ligand':a._cls==='ion'?'element':M.plddt?'plddt':(S.models.length>1?'model':'chain'); } }
+  S.viewer.setBackgroundColor(cssVar('--stage')); S.viewer.zoomTo({},500); S.lastSel=null;
+  return {ok:true,msg:'Reset styles, labels, surfaces and view.'};
+}
+function pickPoint(sel){
+  const atoms=atomsIn(sel); if(!atoms.length) return null;
+  if(atoms.length===1) return {p:atoms[0], label:atomDesc(atoms[0])};
+  const res=new Set(atoms.map(a=>a._r)); if(res.size===1){ const r=[...res][0]; const ca=atoms.find(a=>a.atom==='CA'); if(ca&&atoms.length>4) return {p:ca,label:labelFor(r)+' Cα'}; return {p:centroid(atoms),label:labelFor(r)+(POLY.has(r.cls)?' (centroid)':' centroid')}; }
+  return {p:centroid(atoms), label:sel.desc+' (centroid)'};
+}
+function doMeasure(body){
+  let t=body.replace(/\b(measure|the|distance|how far|is|apart|from each other)\b/ig,' ').replace(/\bbetween\b/i,' ').trim();
+  t=t.replace(/\s+(?:atom|atoms)\s+/ig,' ');
+  const parts=t.split(/\s+(?:and|to|from|with|vs\.?)\s+|\s*,\s*/i).map(s=>s.trim()).filter(Boolean);
+  if(parts.length<2) return {ok:false,msg:'Name two things, e.g. “distance between residue 45 CA and the ligand” or “measure A:57 to A:102”.'};
+  const pts=[]; for(const p of parts.slice(0,2)){
+    let txt=p, atomName=null; const am=p.match(/\b(?:atom\s+)?([A-Z][A-Z0-9']{0,3})\s*$/); if(am && /^(CA|CB|N|C|O|OG|OG1|NZ|OD1|OD2|OE1|OE2|NE2|ND1|SG|SD|OH|NE|NH1|NH2|P|C1'|ZN|FE|MG)$/.test(am[1])){ atomName=am[1]; txt=p.slice(0,am.index).trim(); }
+    const sel=parseSel(txt); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+    const s2=atomName?{test:a=>sel.test(a)&&a.atom===atomName,desc:sel.desc+' '+atomName}:sel;
+    const pt=pickPoint(s2); if(!pt) return {ok:false,msg:`Nothing matched ${s2.desc}.`}; pts.push(pt);
+  }
+  const [A,B]=pts; const d=Math.hypot(A.p.x-B.p.x,A.p.y-B.p.y,A.p.z-B.p.z);
+  S.shapes.push(S.viewer.addCylinder({start:{x:A.p.x,y:A.p.y,z:A.p.z},end:{x:B.p.x,y:B.p.y,z:B.p.z},radius:0.07,dashed:true,dashLength:0.35,gapLength:0.25,color:cssVar('--accent')||'#d0109b',fromCap:1,toCap:1}));
+  addLabel('d'+Math.random(),d.toFixed(2)+' Å',{x:(A.p.x+B.p.x)/2,y:(A.p.y+B.p.y)/2,z:(A.p.z+B.p.z)/2});
+  S.viewer.render();
+  return {ok:true,msg:`${A.label} ↔ ${B.label}: ${d.toFixed(2)} Å.`};
+}
+function doContacts(body){
+  let t=body.replace(/\b(show|find|list|display|draw|what are|which residues? (?:make|form)|the|all|polar|hydrogen|h-?bonds?|bonds?|contacts?|interactions?|interacting|interacts|salt bridges?|made by|formed by|residues)\b/ig,' ').replace(/\s+/g,' ').trim();
+  t=t.replace(/^(?:of|for|around|with|by|from)\s+/i,'');
+  let A,B;
+  const bm=t.match(/^(?:between\s+)?(.+?)\s+(?:and|with|vs\.?)\s+(.+)$/i);
+  if(bm){ A=parseSel(bm[1]); B=parseSel(bm[2]); }
+  else { A=t?parseSel(t):{test:a=>a._cls==='ligand',desc:'the ligands'}; if(A===ALL) A={test:a=>a._cls==='ligand',desc:'the ligands'}; B=A.err?null:{test:a=>!A.test(a)&&a._cls!=='water'&&a._m&&true, desc:'the rest'}; }
+  if(A.err) return {ok:false,msg:A.err,unknown:A.unknown}; if(B&&B.err) return {ok:false,msg:B.err,unknown:B.unknown};
+  const aa=atomsIn(A).filter(a=>a.elem!=='H'), bb=atomsIn(B).filter(a=>a.elem!=='H');
+  if(!aa.length) return {ok:false,msg:`Nothing matched ${A.desc}.`};
+  const near=nearSet(aa,4.0,a=>B.test(a)&&a.elem!=='H');
+  const bres=residuesIn({test:a=>near.has(a._rk)&&B.test(a)});
+  const polarA=aa.filter(a=>a.elem==='N'||a.elem==='O'), polarB=bb.filter(a=>(a.elem==='N'||a.elem==='O')&&near.has(a._rk));
+  let hb=0; const lines=[];
+  for(const p of polarA) for(const q of polarB){ if(p._m!==q._m||p._r===q._r) continue; const d=Math.hypot(p.x-q.x,p.y-q.y,p.z-q.z); if(d<=3.5){ hb++; lines.push([p,q,d]); } }
+  clearShapes();
+  for(const [p,q] of lines) S.shapes.push(S.viewer.addCylinder({start:{x:p.x,y:p.y,z:p.z},end:{x:q.x,y:q.y,z:q.z},radius:0.06,dashed:true,dashLength:0.25,gapLength:0.2,color:'#f2c230'}));
+  for(const r of bres){ for(const a of r.atoms) if(POLY.has(a._cls)) a._rep|=REP.STICK; else if(!a._rep) a._rep=REP.STICK; if(!S.labels.some(l=>l.key===r.key)) addLabel(r.key,labelFor(r),r.center,{size:11}); }
+  for(const a of aa) if(!a._rep) a._rep=REP.STICK;
+  zoomAtoms([...aa,...bres.flatMap(r=>r.atoms)]);
+  S.lastSel=selFromResidues(bres,`residues contacting ${A.desc}`);
+  if(!bres.length) return {ok:true,msg:`No residues within 4 Å of ${A.desc}.`};
+  return {ok:true,msg:`${plural(bres.length,'residue')} within 4 Å of ${A.desc}; ${plural(hb,'polar contact')} ≤ 3.5 Å drawn as yellow dashes.\n${bres.slice(0,40).map(labelFor).join(', ')}${bres.length>40?'…':''}`};
+}
+function doTranslate(body){
+  const m=body.match(/(-?\d+(?:\.\d+)?)\s*(?:å|a|angstroms?)?\s*(?:along|in|on)?\s*(?:the\s+)?([xyz])\b/i);
+  if(!m) return {ok:false,msg:'Say how far and along which axis, e.g. “move chain B 10 Å along x”.'};
+  const d=+m[1], ax=m[2].toLowerCase();
+  const sel=parseSel(selRest(body.replace(m[0],' ').replace(/\b(move|translate|shift|nudge|by)\b/ig,' ')));
+  if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  const atoms=atomsIn(sel); for(const a of atoms) a[ax]+=d;
+  for(const M of S.models) for(const r of M.residues){ r.center = r.rep?{x:r.rep.x,y:r.rep.y,z:r.rep.z}:centroid(r.atoms); }
+  clearSurfaces(true); clearLabels(); clearShapes();
+  return {ok:true,msg:`Moved ${sel.desc} ${d} Å along ${ax}. Export to keep the new coordinates.`};
+}
+function doQuery(low, body){
+  const M=S.models[S.active];
+  const target=(()=>{ const m=body.match(/\b(?:in|of|for|within)\s+(.+?)\s*\??$/i); if(!m) return null; const s=parseSel(m[1]); return s.err?null:s; })();
+  if(/\bsequence\b/.test(low)){
+    const chs=[...M.chains.values()].filter(c=>c.poly.length && (!target || c.poly.some(r=>r.atoms.some(target.test))));
+    if(!chs.length) return {ok:false,msg:'No polymer chain matched.'};
+    return {ok:true,msg:chs.map(c=>`>${M.name}|chain ${c.id}|${c.type}|${c.poly.length}\n${c.poly.map(r=>r.one).join('')}`).join('\n')};
+  }
+  if(/\b(ligands?|small molecules?|het|compounds?|cofactors?|drugs?|inhibitors?)\b/.test(low)){
+    const all=S.models.flatMap(M=>ligandsOf(M).map(r=>({r,M})));
+    if(!all.length) return {ok:true,msg:'No ligands, ions or glycans in the loaded models.'};
+    const g=new Map(); for(const {r} of all){ const k=r.resn+' ('+r.cls+')'; g.set(k,(g.get(k)||0)+1); }
+    return {ok:true,msg:[...g].map(([k,n])=>`${k} × ${n}`).join(', ')};
+  }
+  if(/\b(plddt|confidence)\b/.test(low) || /\b(low|lowest|worst|disordered)\b.*\b(regions?|parts?|residues?)\b/.test(low)){
+    const ms=S.models.filter(M=>M.plddt); if(!ms.length) return {ok:true,msg:'No loaded model has pLDDT scores.'};
+    return {ok:true,msg:ms.map(M=>{ const res=M.residues.filter(r=>POLY.has(r.cls)&&(!target||r.atoms.some(target.test))); const mp=meanPlddt(res); const low=res.filter(r=>plddtOf(r.rep||r.atoms[0])<70); return `${M.name}: mean pLDDT ${fmt1(mp)} over ${res.length} residues; ${low.length} below 70${low.length?': '+compressRanges(low):''}.`+(M.conf&&M.conf.metrics?metricText(M.conf.metrics):''); }).join('\n')};
+  }
+  if(/\b(ptm|iptm|ranking|score|metrics?)\b/.test(low)){
+    const ms=S.models.filter(M=>M.conf); if(!ms.length) return {ok:true,msg:'No confidence summary file is attached. Drop the model\'s summary_confidences / confidence / scores JSON or NPZ.'};
+    return {ok:true,msg:ms.map(M=>M.name+':'+metricText(M.conf.metrics)).join('\n')};
+  }
+  if(/\b(how many|count|number of)\b/.test(low)){
+    const sel = (()=>{ const m=low.match(/\b(?:how many|count|number of)\s+(.+?)(?:\s+(?:are there|is there|do we have|exist|does it have|in (?:the )?(?:structure|model|file|it)))?$/); return m?parseSel(m[1].replace(/\b(are|is|there|in|the|structure|model)\b/g,' ').trim()||'all'):ALL; })();
+    if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+    if(/\bchains?\b/.test(low)&&!/residues|atoms/.test(low)){ return {ok:true,msg:S.models.map(M=>`${M.name}: ${M.chains.size} chains (${[...M.chains.values()].map(c=>c.id+' '+c.type+(c.poly.length?' '+c.poly.length+' res':'')).join(', ')})`).join('\n')}; }
+    if(/\batoms?\b/.test(low)) return {ok:true,msg:`${atomsIn(sel).length} atoms in ${sel.desc}.`};
+    return {ok:true,msg:`${residuesIn(sel).length} residues match ${sel.desc}.`};
+  }
+  if(/\b(list|which|what)\b.*\b(residues?|amino acids?)\b/.test(low) || /^list\b/.test(low)){
+    const txt=body.replace(/^(list|which|what|show me|tell me)\s+(are\s+)?(the\s+)?/i,'').replace(/\b(residues?|amino acids?|are|is|there)\b/ig,' ').trim();
+    const sel=parseSel(txt||'all'); if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+    const res=residuesIn(sel); remember(sel);
+    return {ok:true,msg:res.length?`${res.length} residues in ${sel.desc}: ${compressRanges(res)}`:`Nothing matched ${sel.desc}.`};
+  }
+  if(/\b(info|information|summary|summari[sz]e|describe|what is this|tell me about|overview)\b/.test(low)){
+    return {ok:true,msg:S.models.map(summaryText).join('\n\n')};
+  }
+  return null;
+}
+function compressRanges(res){
+  const by=new Map(); for(const r of res){ (by.get(r.chain)||by.set(r.chain,[]).get(r.chain)).push(r); }
+  const out=[]; for(const [c,list] of by){ const pol=list.filter(r=>POLY.has(r.cls)).map(r=>r.resi).sort((a,b)=>a-b); const other=list.filter(r=>!POLY.has(r.cls)).map(r=>r.resn+r.resi);
+    const rs=[]; for(let i=0;i<pol.length;i++){ let j=i; while(j+1<pol.length&&pol[j+1]===pol[j]+1) j++; rs.push(i===j?`${pol[i]}`:`${pol[i]}–${pol[j]}`); i=j; }
+    out.push(`${by.size>1?c+': ':''}${[...rs,...other].join(', ')}`); }
+  return out.join('; ');
+}
+function metricText(m){ const names={ranking_score:'ranking score',ptm:'pTM',iptm:'ipTM',confidence_score:'confidence score',complex_plddt:'complex pLDDT',complex_iplddt:'interface pLDDT',complex_pde:'complex PDE',ligand_iptm:'ligand ipTM',protein_iptm:'protein ipTM',fraction_disordered:'fraction disordered',has_clash:'has clash',aggregate_score:'aggregate score'}; const e=Object.entries(m).filter(([k])=>names[k]); return e.length?' '+e.map(([k,v])=>`${names[k]} ${typeof v==='number'?fmt2(v):v}`).join(', '):''; }
+function summaryText(M){
+  const pc=[...M.chains.values()].filter(c=>c.poly.length);
+  let s=`${M.name}${M.meta.title?' — '+M.meta.title:''}\n${M.kind==='predicted'?M.source:(M.meta.method||'Structure')}${M.meta.resolution?' at '+M.meta.resolution+' Å':''}. ${pc.length} polymer chains: ${pc.map(c=>`${c.id} (${c.type}, ${c.poly.length})`).join(', ')}.`;
+  const l=ligandsOf(M); if(l.length) s+=` Ligands/ions: ${[...new Set(l.map(r=>r.resn))].join(', ')}.`;
+  if(M.plddt) s+=` Mean pLDDT ${fmt1(meanPlddt(M.residues))}.`;
+  if(M.conf) s+=metricText(M.conf.metrics);
+  return s;
+}
+function ligandsOf(M){ return M.residues.filter(r=>r.cls==='ligand'||r.cls==='ion'||r.cls==='glycan'); }
+
+/* ---------- alignment ---------- */
+function jacobiMaxEigvec(A){
+  const n=4; const a=A.map(r=>r.slice()); const v=[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];
+  for(let sweep=0;sweep<60;sweep++){
+    let off=0; for(let p=0;p<n;p++)for(let q=p+1;q<n;q++) off+=a[p][q]*a[p][q]; if(off<1e-18) break;
+    for(let p=0;p<n;p++)for(let q=p+1;q<n;q++){
+      if(Math.abs(a[p][q])<1e-20) continue;
+      const th=(a[q][q]-a[p][p])/(2*a[p][q]); const t=Math.sign(th||1)/(Math.abs(th)+Math.sqrt(th*th+1)); const c=1/Math.sqrt(t*t+1), s=t*c;
+      for(let k=0;k<n;k++){ const akp=a[k][p], akq=a[k][q]; a[k][p]=c*akp-s*akq; a[k][q]=s*akp+c*akq; }
+      for(let k=0;k<n;k++){ const apk=a[p][k], aqk=a[q][k]; a[p][k]=c*apk-s*aqk; a[q][k]=s*apk+c*aqk; }
+      for(let k=0;k<n;k++){ const vkp=v[k][p], vkq=v[k][q]; v[k][p]=c*vkp-s*vkq; v[k][q]=s*vkp+c*vkq; }
+    }
+  }
+  let bi=0; for(let i=1;i<n;i++) if(a[i][i]>a[bi][bi]) bi=i;
+  return [v[0][bi],v[1][bi],v[2][bi],v[3][bi]];
+}
+function kabsch(P,Q){ // returns {R, cp, cq} mapping P onto Q
+  const n=P.length; const cp=centroid(P), cq=centroid(Q);
+  let Sxx=0,Sxy=0,Sxz=0,Syx=0,Syy=0,Syz=0,Szx=0,Szy=0,Szz=0;
+  for(let i=0;i<n;i++){ const px=P[i].x-cp.x,py=P[i].y-cp.y,pz=P[i].z-cp.z,qx=Q[i].x-cq.x,qy=Q[i].y-cq.y,qz=Q[i].z-cq.z;
+    Sxx+=px*qx;Sxy+=px*qy;Sxz+=px*qz;Syx+=py*qx;Syy+=py*qy;Syz+=py*qz;Szx+=pz*qx;Szy+=pz*qy;Szz+=pz*qz; }
+  const N=[[Sxx+Syy+Szz,Syz-Szy,Szx-Sxz,Sxy-Syx],[Syz-Szy,Sxx-Syy-Szz,Sxy+Syx,Szx+Sxz],[Szx-Sxz,Sxy+Syx,-Sxx+Syy-Szz,Syz+Szy],[Sxy-Syx,Szx+Sxz,Syz+Szy,-Sxx-Syy+Szz]];
+  const [w,x,y,z]=jacobiMaxEigvec(N);
+  const R=[[w*w+x*x-y*y-z*z,2*(x*y-w*z),2*(x*z+w*y)],[2*(x*y+w*z),w*w-x*x+y*y-z*z,2*(y*z-w*x)],[2*(x*z-w*y),2*(y*z+w*x),w*w-x*x-y*y+z*z]];
+  return {R,cp,cq};
+}
+function applyT(T,p){ const x=p.x-T.cp.x,y=p.y-T.cp.y,z=p.z-T.cp.z; return {x:T.R[0][0]*x+T.R[0][1]*y+T.R[0][2]*z+T.cq.x, y:T.R[1][0]*x+T.R[1][1]*y+T.R[1][2]*z+T.cq.y, z:T.R[2][0]*x+T.R[2][1]*y+T.R[2][2]*z+T.cq.z}; }
+function rmsd(P,Q,T){ let s=0; for(let i=0;i<P.length;i++){ const p=T?applyT(T,P[i]):P[i]; s+=(p.x-Q[i].x)**2+(p.y-Q[i].y)**2+(p.z-Q[i].z)**2; } return Math.sqrt(s/P.length); }
+function nwAlign(a,b){ // global alignment of residue arrays by one-letter code; returns pairs [i,j]
+  const n=a.length,m=b.length; if(n*m>9e6) return null;
+  const W=m+1; const H=new Int32Array((n+1)*W), D=new Uint8Array((n+1)*W); const g=-3;
+  for(let i=1;i<=n;i++){H[i*W]=i*g;D[i*W]=1;} for(let j=1;j<=m;j++){H[j]=j*g;D[j]=2;}
+  for(let i=1;i<=n;i++) for(let j=1;j<=m;j++){ const s=H[(i-1)*W+j-1]+(a[i-1].one===b[j-1].one?4:-1), u=H[(i-1)*W+j]+g, l=H[i*W+j-1]+g; let best=s,d=0; if(u>best){best=u;d=1;} if(l>best){best=l;d=2;} H[i*W+j]=best; D[i*W+j]=d; }
+  const pairs=[]; let i=n,j=m; while(i>0&&j>0){ const d=D[i*W+j]; if(d===0){ if(a[i-1].one===b[j-1].one) pairs.push([i-1,j-1]); i--;j--; } else if(d===1) i--; else j--; }
+  return pairs.reverse();
+}
+function matchResidues(Mm,Mt){
+  const tmap=new Map(); for(const r of Mt.residues) if(r.rep&&POLY.has(r.cls)) tmap.set(r.chain+'|'+r.resi+r.icode+'|'+r.resn,r);
+  let pairs=[]; for(const r of Mm.residues){ if(!r.rep||!POLY.has(r.cls)) continue; const t=tmap.get(r.chain+'|'+r.resi+r.icode+'|'+r.resn); if(t) pairs.push([r,t]); }
+  const nm=Mm.residues.filter(r=>r.rep&&POLY.has(r.cls)).length, nt=tmap.size;
+  if(pairs.length >= 0.6*Math.min(nm,nt)) return {pairs,how:'matching chain and residue numbers'};
+  // sequence alignment chain by chain (best partner for each mobile chain), else concatenated
+  pairs=[];
+  const mch=[...Mm.chains.values()].filter(c=>c.poly.length), tch=[...Mt.chains.values()].filter(c=>c.poly.length);
+  const used=new Set();
+  for(const c of mch){ let best=null,bp=null; for(const d of tch){ if(used.has(d.id)) continue; const ar=c.poly.filter(r=>r.rep), br=d.poly.filter(r=>r.rep); const p=nwAlign(ar,br); if(p&&(!bp||p.length>bp.length)){bp=p;best={d,ar,br};} }
+    if(best&&bp.length>=3){ used.add(best.d.id); for(const [i,j] of bp) pairs.push([best.ar[i],best.br[j]]); } }
+  return {pairs,how:'sequence alignment'};
+}
+function doAlign(low){
+  if(S.models.length<2) return {ok:false,msg:'Load at least two models to superpose, e.g. a prediction and the experimental structure.'};
+  const ids=[...low.matchAll(/(?:model\s*|#)(\d+)/g)].map(m=>+m[1]);
+  let mob,tgt;
+  if(ids.length>=2){ mob=S.models.find(M=>M.id===ids[0]); tgt=S.models.find(M=>M.id===ids[1]); }
+  else if(ids.length===1){ mob=S.models.find(M=>M.id===ids[0]); tgt=S.models.find(M=>M!==mob); }
+  else { tgt=S.models[0]; }
+  if(!tgt||(ids.length&&!mob)) return {ok:false,msg:`Model numbers here: ${S.models.map(M=>'#'+M.id).join(', ')}.`};
+  const movers = mob?[mob]:S.models.filter(M=>M!==tgt);
+  const out=[];
+  for(const Mm of movers){
+    const {pairs,how}=matchResidues(Mm,tgt);
+    if(pairs.length<3){ out.push(`${Mm.name}: too few matching residues to superpose.`); continue; }
+    let P=pairs.map(p=>p[0].rep), Q=pairs.map(p=>p[1].rep);
+    let T=kabsch(P,Q); const all=rmsd(P,Q,T);
+    // refine on the core (pairs within 4 Å), like a quick iterative fit
+    let core=pairs, Tc=T; for(let it=0;it<3;it++){ const keep=pairs.filter(([a,b])=>{ const p=applyT(Tc,a.rep); return Math.hypot(p.x-b.rep.x,p.y-b.rep.y,p.z-b.rep.z)<4; }); if(keep.length<Math.max(3,pairs.length*0.3)) break; core=keep; Tc=kabsch(core.map(p=>p[0].rep),core.map(p=>p[1].rep)); }
+    const coreR=rmsd(core.map(p=>p[0].rep),core.map(p=>p[1].rep),Tc);
+    const allAfter=rmsd(P,Q,Tc);
+    const useT = coreR<all? Tc:T;
+    for(const a of Mm.atoms){ const p=applyT(useT,a); a.x=p.x;a.y=p.y;a.z=p.z; }
+    for(const r of Mm.residues) r.center=r.rep?{x:r.rep.x,y:r.rep.y,z:r.rep.z}:centroid(r.atoms);
+    out.push(`${Mm.name} → ${tgt.name}: ${pairs.length} Cα pairs by ${how}; RMSD ${fmt2(Math.min(all,allAfter))} Å overall, ${fmt2(coreR)} Å over the ${core.length}-residue core.`);
+    if(!S.models.some(M=>M.plddt)) for(const a of Mm.atoms) if(POLY.has(a._cls)) a._col='model';
+  }
+  if(!S.models.some(M=>M.plddt)) for(const a of tgt.atoms) if(POLY.has(a._cls)) a._col='model';
+  clearSurfaces(true); clearLabels(); clearShapes();
+  S.viewer.zoomTo({},600);
+  return {ok:true,msg:out.join('\n')};
+}
+
+/* ---------- export ---------- */
+function pdbText(atoms){
+  const lines=[]; let n=1, lastChain=null;
+  for(const a of atoms){
+    if(lastChain!==null && a.chain!==lastChain && POLY.has(atoms[n-2]?._cls)) lines.push('TER');
+    lastChain=a.chain;
+    let name=a.atom||''; if(name.length<4 && (a.elem||'').length===1) name=' '+name;
+    const rec=(a.hetflag?'HETATM':'ATOM  ');
+    lines.push(rec+String(n++%100000).padStart(5)+' '+name.padEnd(4)+' '+(a.resn||'').slice(0,3).padStart(3)+' '+String(a.chain||'A').slice(0,1)+String(a.resi).padStart(4)+(a.icode||' ').slice(0,1)+'   '+a.x.toFixed(3).padStart(8)+a.y.toFixed(3).padStart(8)+a.z.toFixed(3).padStart(8)+(a.occupancy??1).toFixed(2).padStart(6)+(a.b??0).toFixed(2).padStart(6)+'          '+(a.elem||'').toUpperCase().padStart(2));
+  }
+  lines.push('END'); return 'REMARK   1 WRITTEN BY FOLD LENS\n'+lines.join('\n')+'\n';
+}
+async function saveFile(filename,data,mime){
+  const ok=/\.(gif|png|jpg|jpeg|webp|txt|json|md|csv|html|svg|pdf|zip)$/i.test(filename);
+  let fn=filename, payload=data;
+  if(!ok){ if(typeof fflate==='undefined'){ fn=filename+'.txt'; } else { const bytes=typeof data==='string'?new TextEncoder().encode(data):data; payload=new Blob([fflate.zipSync({[filename]:bytes})],{type:'application/zip'}); fn=filename+'.zip'; } }
+  if(S.downloads){ try{ await S.downloads.save({filename:fn,data:payload}); return `Saved ${fn}.`; }catch(e){ if(e&&e.code==='declined') return 'Save cancelled.'; } }
+  // fallback for a standalone copy
+  try{ const blob=payload instanceof Blob?payload:new Blob([payload],{type:mime||'text/plain'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); return `Offered ${fn} for download.`; }catch(e){ return 'Saving is not available in this view; use Copy instead.'; }
+}
+function doExport(low,body){
+  if(/\b(png|image|picture|screenshot|snapshot|render|figure)\b/.test(low)){
+    const uri=S.viewer.pngURI(); fetch(uri).then(r=>r.blob()).then(b=>saveFile((S.models[S.active]?.name||'fold-lens')+'.png',b,'image/png')).then(m=>logMsg('viewer',m));
+    return {ok:true,msg:'Preparing the image…'};
+  }
+  const selText=selRest(body.replace(/\b(export|save|download|write|as|to|a|pdb|file|coordinates|structure|model|format)\b/ig,' '));
+  const sel=selText?parseSel(selText):ALL; if(sel.err) return {ok:false,msg:sel.err,unknown:sel.unknown};
+  const M=S.models[S.active]; const atoms=M.atoms.filter(a=>sel===ALL||sel.test(a));
+  saveFile(M.name+(sel===ALL?'':'_sel')+'.pdb', pdbText(atoms),'chemical/x-pdb').then(m=>logMsg('viewer',m));
+  return {ok:true,msg:`Writing ${plural(atoms.length,'atom')} of ${M.name} as PDB (current coordinates, including any alignment or moves).`};
+}
+
+/* ============================== panels ============================== */
+function refreshAll(){ refreshModels(); refreshPanels(); updateChips(); }
+function refreshPanels(){ refreshInfo(); refreshLigs(); refreshSeq(); refreshConf(); }
+function refreshModels(){
+  const el=$('#models');
+  if(!S.models.length){ el.innerHTML='<p class="note">Nothing loaded yet.</p>'; return; }
+  el.innerHTML=S.models.map((M,i)=>`<div class="mcard ${i===S.active?'active':''}" data-i="${i}">
+    <span class="idx">#${M.id}</span><span class="nm" data-act="activate" title="${esc(M.file)}">${esc(M.name)}</span>
+    <span class="acts"><button class="btn small" data-act="vis" aria-label="${M.visible?'Hide':'Show'} ${esc(M.name)}">${M.visible?'Hide':'Show'}</button><button class="btn small" data-act="del" aria-label="Remove ${esc(M.name)}">×</button></span>
+    <span class="sub">${M.kind==='predicted'?`<span class="badge pred">${esc(M.source)}</span>`:`<span class="badge">${esc(M.meta.method||'Structure')}${M.meta.resolution?' · '+M.meta.resolution+' Å':''}</span>`} ${M.residues.filter(r=>POLY.has(r.cls)).length} residues${M.pae?' · PAE':''}${M.conf&&M.conf.metrics.iptm!=null?' · ipTM '+fmt2(M.conf.metrics.iptm):M.conf&&M.conf.metrics.ptm!=null?' · pTM '+fmt2(M.conf.metrics.ptm):''}</span></div>`).join('');
+}
+$('#models').addEventListener('click',e=>{
+  const card=e.target.closest('.mcard'); if(!card) return; const i=+card.dataset.i; const M=S.models[i]; const act=e.target.closest('[data-act]')?.dataset.act;
+  if(act==='vis'){ M.visible=!M.visible; renderStyles(); refreshModels(); return; }
+  if(act==='del'){ S.viewer.removeModel(M.model); S.models.splice(i,1); clearSurfaces(true); clearLabels(); clearShapes(); S.active=Math.min(S.active,S.models.length-1); renderStyles(); refreshAll(); buildEntities(); if(!S.models.length) $('#emptyMsg').hidden=false; return; }
+  S.active=i; refreshAll(); buildEntities();
+});
+function refreshInfo(){
+  const M=S.models[S.active]; const el=$('#infoSec');
+  if(!M){ el.innerHTML=''; return; }
+  const pc=[...M.chains.values()].filter(c=>c.poly.length);
+  el.innerHTML=`<h3>About ${esc(M.name)}</h3>${M.meta.title?`<p style="color:var(--ink)">${esc(M.meta.title)}</p>`:''}
+  <dl class="kv"><dt>Type</dt><dd>${M.kind==='predicted'?esc(M.source):esc(M.meta.method||'unknown')}</dd>
+  ${M.meta.resolution?`<dt>Resolution</dt><dd>${M.meta.resolution} Å</dd>`:''}
+  <dt>Chains</dt><dd>${pc.map(c=>`${esc(c.id)} ${c.type} (${c.poly.length})`).join(', ')||'–'}</dd>
+  <dt>Atoms</dt><dd>${M.atoms.length.toLocaleString()}</dd>
+  ${M.plddt?`<dt>Mean pLDDT</dt><dd>${fmt1(meanPlddt(M.residues))}</dd>`:''}
+  ${M.nmr>1?`<dt>Ensemble</dt><dd>model 1 of ${M.nmr}</dd>`:''}</dl>`;
+}
+function refreshLigs(){
+  const M=S.models[S.active]; const el=$('#ligs'); if(!M){ el.innerHTML='<span class="note">None in this model.</span>'; return; }
+  const ls=ligandsOf(M); if(!ls.length){ el.innerHTML='<span class="note">None in this model.</span>'; return; }
+  const show=ls.slice(0,40);
+  el.innerHTML=show.map(r=>`<button class="chip" data-cmd="show contacts of ${r.resn} ${r.chain}:${r.resi}" title="${r.cls}">${esc(r.resn)} ${esc(r.chain)}${r.resi}</button>`).join('')+(ls.length>40?`<span class="note">+${ls.length-40} more</span>`:'');
+}
+function refreshSeq(){
+  const M=S.models[S.active]; const el=$('#seq'); if(!M){ el.innerHTML=''; return; }
+  const chs=[...M.chains.values()].filter(c=>c.poly.length);
+  let total=0;
+  el.innerHTML=chs.map(c=>{ const rs=c.poly.slice(0,Math.max(0,4000-total)); total+=rs.length;
+    return `<div class="ch"><b>Chain ${esc(c.id)} · ${c.type} · ${c.poly.length}</b><div class="rs">${rs.map((r,i)=>{ const p=M.plddt?plddtOf(r.rep||r.atoms[0]):null; const bg=p!=null?`background:${hex(mixCol(plddtCol(p),parseInt((cssVar('--panel')||'#ffffff').slice(1),16)||0xffffff,0.55))}`:''; const tick=(r.resi%10===0); return `<span class="r${tick?' tick':''}" data-k="${esc(r.key)}" data-n="${r.resi}" style="${bg}" title="${r.resn} ${r.resi}${p!=null?' · pLDDT '+fmt1(p):''}">${r.one}</span>`; }).join('')}</div></div>`; }).join('');
+}
+$('#seq').addEventListener('click',e=>{
+  const s=e.target.closest('.r'); if(!s) return; const M=S.models[S.active]; const r=M.rmap.get(s.dataset.k); if(!r) return;
+  const cmd=`highlight ${M.chains.size>1?r.chain+':':'residue '}${r.resi}${S.models.length>1?' in model '+M.id:''}`; submit(cmd);
+});
+function refreshConf(){
+  const el=$('#p-conf'); const M=S.models[S.active];
+  if(!M){ el.innerHTML='<section class="sec"><h3>Confidence</h3><p>Load a predicted model to see pLDDT, PAE and interface scores.</p></section>'; return; }
+  let html='';
+  if(M.plddt){
+    const res=M.residues.filter(r=>POLY.has(r.cls)); const b={vh:0,h:0,l:0,vl:0};
+    for(const r of res){ const p=plddtOf(r.rep||r.atoms[0]); if(p>=90)b.vh++; else if(p>=70)b.h++; else if(p>=50)b.l++; else b.vl++; }
+    const n=res.length||1;
+    html+=`<section class="sec"><h3>pLDDT · ${esc(M.source)}</h3>
+    <dl class="kv"><dt>Mean</dt><dd>${fmt1(meanPlddt(res))}</dd><dt>Residues</dt><dd>${res.length}</dd></dl>
+    <div class="bands">${['vh','h','l','vl'].map(k=>`<span style="width:${b[k]/n*100}%;background:${hex(PL[k])}"></span>`).join('')}</div>
+    <div class="bandkey"><span><i style="background:${hex(PL.vh)}"></i>Very high ≥90 · ${Math.round(b.vh/n*100)}%</span><span><i style="background:${hex(PL.h)}"></i>Confident 70–90 · ${Math.round(b.h/n*100)}%</span><span><i style="background:${hex(PL.l)}"></i>Low 50–70 · ${Math.round(b.l/n*100)}%</span><span><i style="background:${hex(PL.vl)}"></i>Very low &lt;50 · ${Math.round(b.vl/n*100)}%</span></div>
+    <div class="row"><button class="chip" data-cmd="color by plddt">Colour by pLDDT</button><button class="chip" data-cmd="highlight low confidence regions in orange">Find low-confidence regions</button><button class="chip" data-cmd="hide very low confidence">Hide pLDDT &lt; 50</button></div></section>`;
+  } else {
+    html+=`<section class="sec"><h3>Experimental structure</h3><p>${esc(M.name)} is ${esc(M.meta.method||'an experimental model')}${M.meta.resolution?' at '+M.meta.resolution+' Å':''}. Its B-factor column holds atomic displacement, not pLDDT.</p>
+    <dl class="kv"><dt>B-factor range</dt><dd>${fmt1(M.bmin)} – ${fmt1(M.bmax)}</dd></dl>
+    <div class="row"><button class="chip" data-cmd="color by b-factor">Colour by B-factor</button><button class="chip" data-cmd="treat b-factor as plddt">This is actually a prediction</button></div></section>`;
+  }
+  if(M.conf && Object.keys(M.conf.metrics).length){
+    html+=`<section class="sec"><h3>Model scores</h3><dl class="kv">${Object.entries(M.conf.metrics).map(([k,v])=>`<dt>${esc(k.replace(/_/g,' '))}</dt><dd>${typeof v==='number'?fmt2(v):esc(String(v))}</dd>`).join('')}</dl>`;
+    if(M.conf.chainPair){ const ids=[...M.chains.values()].filter(c=>c.poly.length||true).map(c=>c.id).slice(0,M.conf.chainPair.length);
+      html+=`<p>Chain-pair ipTM (higher is better; ≥0.8 confident, &lt;0.6 likely wrong)</p><div class="scroll-x"><table class="mini"><tr><th></th>${ids.map(i=>`<th>${esc(i)}</th>`).join('')}</tr>${M.conf.chainPair.map((row,i)=>`<tr><th>${esc(ids[i]||i)}</th>${row.map(v=>`<td style="background:${v==null?'transparent':hex(mixCol(0xf3f3f3,v>=0.8?PL.vh:v>=0.6?PL.h:PL.vl,0.35))}">${v==null?'–':fmt2(v)}</td>`).join('')}</tr>`).join('')}</table></div>`; }
+    html+=`</section>`;
+  }
+  if(M.pae){
+    html+=`<section class="sec"><h3>Predicted aligned error</h3><p>Expected position error (Å) of residue x when the model is aligned on residue y. Drag a box to colour those residues in 3D.</p>
+    <div class="paebox" id="paebox"><canvas id="paecv"></canvas><div class="selrect" id="paesel" hidden></div></div>
+    <div class="paescale"><span>0 Å</span><span class="g"></span><span>${fmt1(M.pae.max)} Å</span></div>
+    <p class="note">${M.pae.n} tokens${M.pae.tokens?'':' · could not be matched to residues'}${M.pae.file?' · '+esc(M.pae.file):''}</p></section>`;
+  } else if(M.plddt){
+    html+=`<section class="sec"><h3>Predicted aligned error</h3><p>Drop the PAE file that came with this model to see domain and interface confidence: AlphaFold DB <code>…predicted_aligned_error_v4.json</code>, AlphaFold 3 <code>…full_data_0.json</code>, ColabFold <code>…scores_rank_001….json</code>, Boltz <code>pae_…npz</code>.</p></section>`;
+  }
+  html+=`<section class="sec"><h3>Supported prediction outputs</h3><dl class="kv">
+  <dt>AlphaFold DB</dt><dd>model PDB/CIF + PAE JSON</dd>
+  <dt>AlphaFold 3 / Server</dt><dd>zip, or model CIF + summary_confidences + full_data JSON</dd>
+  <dt>ColabFold</dt><dd>rank_001 PDB + scores JSON</dd>
+  <dt>Boltz-1/2</dt><dd>model CIF/PDB + confidence JSON + pae/plddt NPZ</dd>
+  <dt>Chai-1</dt><dd>pred.model_idx_N.cif + scores NPZ</dd>
+  <dt>Protenix, ESMFold, OpenFold</dt><dd>pLDDT from the B-factor column</dd></dl></section>`;
+  el.innerHTML=html;
+  if(M.pae) drawPae(M);
+}
+function drawPae(M){
+  const cv=$('#paecv'); if(!cv) return; const n=M.pae.n; const size=Math.min(n,600); cv.width=size; cv.height=size;
+  const ctx=cv.getContext('2d'); const img=ctx.createImageData(size,size); const mx=M.pae.max||30; const st=n/size;
+  const lo=[0x0f,0x5c,0x2e], mid=[0x5f,0xae,0x6e], hi=[0xe6,0xf2,0xe8];
+  for(let y=0;y<size;y++){ const i=Math.floor(y*st); const row=M.pae.matrix[i]; for(let x=0;x<size;x++){ const v=row[Math.floor(x*st)]/mx; const t=Math.max(0,Math.min(1,v)); const [a,b,u]=t<0.5?[lo,mid,t*2]:[mid,hi,(t-0.5)*2]; const o=(y*size+x)*4; img.data[o]=a[0]+(b[0]-a[0])*u; img.data[o+1]=a[1]+(b[1]-a[1])*u; img.data[o+2]=a[2]+(b[2]-a[2])*u; img.data[o+3]=255; } }
+  ctx.putImageData(img,0,0);
+  if(M.pae.tokens){ ctx.strokeStyle='rgba(0,0,0,.55)'; ctx.lineWidth=Math.max(1,size/300); let prev=null; M.pae.tokens.forEach((r,i)=>{ if(r&&prev&&r.chain!==prev.chain){ const p=i/st; ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,size); ctx.moveTo(0,p); ctx.lineTo(size,p); ctx.stroke(); } if(r) prev=r; }); }
+  const box=$('#paebox'), rect=$('#paesel'); let start=null;
+  const pos=e=>{ const b=cv.getBoundingClientRect(); const pt=e.touches?e.touches[0]:e; return {x:Math.max(0,Math.min(1,(pt.clientX-b.left)/b.width)),y:Math.max(0,Math.min(1,(pt.clientY-b.top)/b.height))}; };
+  const draw=(a,b)=>{ rect.hidden=false; rect.style.left=Math.min(a.x,b.x)*100+'%'; rect.style.top=Math.min(a.y,b.y)*100+'%'; rect.style.width=Math.abs(a.x-b.x)*100+'%'; rect.style.height=Math.abs(a.y-b.y)*100+'%'; };
+  cv.onpointerdown=e=>{ start=pos(e); cv.setPointerCapture(e.pointerId); draw(start,start); };
+  cv.onpointermove=e=>{ if(start) draw(start,pos(e)); else { const p=pos(e); const i=Math.floor(p.y*n), j=Math.floor(p.x*n); const ri=M.pae.tokens?.[i], rj=M.pae.tokens?.[j]; cv.title=`aligned on ${ri?labelFor(ri):i+1}, error at ${rj?labelFor(rj):j+1}: ${fmt1(M.pae.matrix[i]?.[j])} Å`; } };
+  cv.onpointerup=e=>{ if(!start) return; const end=pos(e); const a=start; start=null; if(!M.pae.tokens) return;
+    const y0=Math.floor(Math.min(a.y,end.y)*n), y1=Math.ceil(Math.max(a.y,end.y)*n), x0=Math.floor(Math.min(a.x,end.x)*n), x1=Math.ceil(Math.max(a.x,end.x)*n);
+    const rows=new Set(M.pae.tokens.slice(y0,Math.max(y0+1,y1)).filter(Boolean)), cols=new Set(M.pae.tokens.slice(x0,Math.max(x0+1,x1)).filter(Boolean));
+    let mean=0,k=0; for(let i=y0;i<Math.max(y0+1,y1);i++) for(let j=x0;j<Math.max(x0+1,x1);j++){ if(M.pae.matrix[i]&&M.pae.matrix[i][j]!=null){ mean+=M.pae.matrix[i][j]; k++; } }
+    for(const at of M.atoms){ if(rows.has(at._r)) at._col='#d0109b'; else if(cols.has(at._r)) at._col='#20a0c0'; else if(POLY.has(at._cls)) at._col='#c9ced4'; }
+    renderStyles(); updateLegendPae(rows,cols);
+    logMsg('viewer',`PAE box: aligned on ${compressRanges([...rows])} (magenta), error measured on ${compressRanges([...cols])} (cyan). Mean ${fmt1(mean/(k||1))} Å.`);
+  };
+}
+function updateLegendPae(){ const el=$('#legend'); el.innerHTML=`<b>PAE selection</b><span><i style="background:#d0109b"></i>Aligned on (rows)</span><span><i style="background:#20a0c0"></i>Error measured (columns)</span>`; el.hidden=false; }
+function ligandChipCmds(M){
+  const out=[]; const ls=ligandsOf(M).filter(r=>r.cls==='ligand');
+  const lig=ls[0];
+  if(M.plddt) out.push('color by plddt','highlight low confidence regions');
+  if(M.pae&&M.pae.tokens){ const c=[...M.chains.values()].filter(c=>c.poly.length); if(c.length>1) out.push(`color by pae relative to chain ${c[0].id}`); else out.push(`color by pae relative to residue ${c[0]?.poly[Math.floor(c[0].poly.length/2)]?.resi||1}`); }
+  if(lig) out.push(`show the binding site of ${lig.resn} and label it`, `show contacts of ${lig.resn}`, `surface the pocket around ${lig.resn}, transparent`);
+  const cs=[...M.chains.values()].filter(c=>c.poly.length);
+  if(cs.length>1) out.push(`show the interface between chain ${cs[0].id} and chain ${cs[1].id} as sticks`, 'color by chain');
+  if(S.models.length>1) out.push(`align model ${S.models[S.models.length-1].id} onto model ${S.models[0].id}`);
+  out.push('color by secondary structure','show hydrophobic residues as sticks in orange','what ligands are there?','spin','reset');
+  return out;
+}
+function updateChips(){
+  const M=S.models[S.active]; const el=$('#chips');
+  const cmds = M? ligandChipCmds(M) : ['load sample'];
+  el.innerHTML=cmds.slice(0,10).map(c=>`<button class="chip" type="button" data-cmd="${esc(c)}">${esc(c)}</button>`).join('');
+  const lig=M&&ligandsOf(M).find(r=>r.cls==='ligand');
+  $('#cmd').placeholder = M? (lig?`Try: show the binding site of ${lig.resn} and label it`: M.plddt?'Try: highlight low confidence regions in orange':'Try: color by chain, then show cysteines as sticks') : 'Load a structure, then tell the viewer what to do';
+}
+document.addEventListener('click',e=>{ const b=e.target.closest('[data-cmd]'); if(b){ e.preventDefault(); $('#cmd').value=b.dataset.cmd; submit(b.dataset.cmd); } });
+
+/* ============================== console ============================== */
+function logMsg(who,text){
+  if(!text) return null;
+  const el=$('#log'); const d=document.createElement('div'); d.className='msg '+who;
+  const label={you:'You',viewer:'Viewer',err:'Viewer',claude:'Claude'}[who]||who;
+  d.innerHTML=`<span class="who">${label}</span><span class="txt"></span>`; d.querySelector('.txt').textContent=text;
+  el.appendChild(d); while(el.children.length>80) el.firstChild.remove(); el.scrollTop=el.scrollHeight;
+  S.chat.push({who,text}); if(S.chat.length>40) S.chat.shift();
+  return d;
+}
+function looksLikeQuestion(t){ return /\?\s*$/.test(t) || /^(why|how come|explain|compare|is it|does|do |should|could|would|interpret|what does|what do|what's the|is this|are these|which (?:is|are) (?:more|most|better))\b/i.test(t.trim()); }
+async function submit(text){
+  text=(text||'').trim(); if(!text||S.busy) return;
+  logMsg('you',text); $('#cmd').value='';
+  if(S.mode==='claude' && S.sample){ return askClaude(text); }
+  const res=runText(text);
+  const unknown=res.some(r=>r.unknown);
+  for(const r of res){ if(r.msg) logMsg(r.ok?'viewer':'err', r.msg); }
+  if((unknown || (looksLikeQuestion(text)&&res.every(r=>!r.ok))) && S.sample){ logMsg('viewer','Passing that to Claude…'); return askClaude(text); }
+  if(unknown && !S.sample) logMsg('viewer','Open the Commands tab for phrasing that works offline.');
+}
+$('#cmdForm').addEventListener('submit',e=>{ e.preventDefault(); submit($('#cmd').value); });
+function setMode(m){ S.mode=m; $('#modeLocal').setAttribute('aria-pressed',m==='local'); $('#modeClaude').setAttribute('aria-pressed',m==='claude'); }
+$('#modeLocal').onclick=()=>setMode('local');
+$('#modeClaude').onclick=()=>{ if(S.sample) setMode('claude'); };
+
+/* ---------- Claude ---------- */
+const CLAUDE_RULES = `You drive a molecular viewer called Fold Lens. The viewer understands short English commands, one per string. Translate the user's request into commands and run them with the run_viewer_commands tool, then reply in 1-3 plain sentences (what you did, or the answer). For questions about the structure, call get_structure_summary or list_residues first and answer from that data; do not invent facts the data does not show. If a command returns an error, fix the phrasing and try once more.
+
+Command phrasing the viewer understands (selections can be combined with "and", "in", "except", "within N Å of"):
+- show <sel> [as cartoon|sticks|spheres|lines|ball and stick|trace]   e.g. "show chain B as sticks", "show residues 40-60 in chain A as sticks"
+- only show <sel> | hide <sel> [sticks...] | delete <sel>  (delete removes atoms, e.g. "delete waters")
+- color <sel> <colour name or #hex> | color <sel> by chain|plddt|b-factor|rainbow|secondary structure|hydrophobicity|residue type|element|model
+- color by pae relative to <sel>   (predicted models with PAE)
+- highlight <sel> [colour]   (sticks + colour + zoom)
+- zoom to <sel> | zoom out | label <sel> | clear labels
+- surface <sel> [transparent] [colored by plddt|hydrophobicity|chain] | remove surface
+- show contacts of <sel> | show contacts between <sel> and <sel>
+- distance between <sel> and <sel>   (e.g. "distance between A:57 CA and A:102 CA")
+- align model 2 onto model 1  (sequence-aware Cα superposition, reports RMSD)
+- move <sel> 10 Å along x | spin | stop spinning | rotate 90 about x | background black | opacity 50% | reset
+- export pdb | export chain A | export png
+Selections: chain A, residues 10-20, A:57, his57, K48, ligands, ZYB (any residue name), water, ions, glycans, protein, DNA, RNA, backbone, side chains, helices, strands, loops, hydrophobic/polar/charged/aromatic residues, cysteines, low confidence (pLDDT<70), very low confidence (<50), plddt < 60, binding site of <sel>, interface between chain A and chain B, first 20 residues, N-terminus, model 2, "it"/"them" (last selection).`;
+function claudeTools(){
+  return [
+    {name:'run_viewer_commands', description:'Run one or more viewer commands in order. Returns each command\'s result message, or an error to fix.',
+      inputSchema:{type:'object',properties:{commands:{type:'array',items:{type:'string'},description:'Short English commands, one action each'}},required:['commands']},
+      execute:async({commands})=>{ const list=Array.isArray(commands)?commands:[String(commands||'')]; const out=[]; for(const c of list.slice(0,20)){ const rs=runText(String(c),{continueOnUnknown:true}); for(const r of rs){ out.push({command:r.clause, ok:!!r.ok, result:r.msg}); if(r.msg) logMsg(r.ok?'viewer':'err',`${r.clause} → ${r.msg}`); } } return out; }},
+    {name:'get_structure_summary', description:'Summary of every loaded model: chains, lengths, sequences (truncated), ligands, experimental method or predictor, pLDDT statistics and confidence metrics.',
+      execute:async()=>structureSummary()},
+    {name:'list_residues', description:'List residues matching a selection phrase (e.g. "binding site of ZYB", "plddt < 50", "interface between chain A and chain C"). Returns up to 150 residues with pLDDT/B-factor.',
+      inputSchema:{type:'object',properties:{selection:{type:'string'}},required:['selection']},
+      execute:async({selection})=>{ const s=parseSel(String(selection||'')); if(s.err) throw new Error(s.err); const res=residuesIn(s); return {description:s.desc,count:res.length,residues:res.slice(0,150).map(r=>({model:r.M.id,chain:r.chain,resi:r.resi,resn:r.resn,type:r.cls,plddt:r.M.plddt?+fmt1(plddtOf(r.rep||r.atoms[0])):undefined,b:r.M.plddt?undefined:+fmt1((r.rep||r.atoms[0]).b)}))}; }},
+  ];
+}
+function structureSummary(){
+  return S.models.map(M=>({model:M.id,name:M.name,title:M.meta.title,kind:M.kind,source:M.source,method:M.meta.method,resolution:M.meta.resolution,active:M===S.models[S.active],
+    chains:[...M.chains.values()].filter(c=>c.poly.length).map(c=>({id:c.id,type:c.type,length:c.poly.length,first:c.poly[0].resi,last:c.poly[c.poly.length-1].resi,sequence:c.poly.map(r=>r.one).join('').slice(0,600),meanPlddt:M.plddt?+fmt1(meanPlddt(c.poly)):undefined})),
+    ligands:ligandsOf(M).slice(0,60).map(r=>`${r.resn} ${r.chain}:${r.resi} (${r.cls})`), meanPlddt:M.plddt?+fmt1(meanPlddt(M.residues)):undefined, metrics:M.conf?M.conf.metrics:undefined, chainPairIptm:M.conf?.chainPair, hasPAE:!!M.pae}));
+}
+let claudeCtl=null;
+async function askClaude(text){
+  S.busy=true; $('#runBtn').textContent='Stop'; $('#runBtn').type='button';
+  claudeCtl=new AbortController();
+  $('#runBtn').onclick=()=>claudeCtl&&claudeCtl.abort();
+  const bubble=logMsg('claude','Thinking…');
+  const recent=S.chat.slice(-10,-1).map(m=>`${m.who}: ${m.text}`).join('\n');
+  const prompt=`${CLAUDE_RULES}\n\nLoaded models (short):\n${S.models.map(M=>`#${M.id} ${summaryText(M)}`).join('\n')||'none'}\n\nRecent console:\n${recent}\n\nUser request: ${text}`;
+  try{
+    const {text:ans}=await S.sample(prompt,{tools:claudeTools(),signal:claudeCtl.signal,cache:false,onText:({text})=>{ bubble.querySelector('.txt').textContent=text; $('#log').scrollTop=1e9; }});
+    bubble.querySelector('.txt').textContent=ans||'Done.';
+    S.chat.push({who:'claude',text:ans});
+  }catch(e){
+    const msg={not_granted:'Claude is not allowed for this page. The built-in parser still works.',rate_limited:'Too many requests right now. Wait a moment, then try again.',cancelled:'Stopped.',prompt_too_large:'Too much data to send; try a narrower question.'}[e&&e.code]||('Claude could not answer: '+((e&&e.message)||e));
+    bubble.querySelector('.txt').textContent=(e&&e.text?e.text+'\n':'')+msg;
+    if(e&&e.code==='not_granted'){ S.sample=null; $('#modeClaude').disabled=true; setMode('local'); }
+  }finally{
+    S.busy=false; $('#runBtn').textContent='Run'; $('#runBtn').type='submit'; $('#runBtn').onclick=null; renderStyles(); refreshPanels();
+  }
+}
+
+/* ============================== co-fold builder ============================== */
+function buildEntities(){
+  const M=S.models[S.active]; S.entities=[];
+  if(M){
+    const seen=new Map();
+    for(const c of M.chains.values()){
+      if(!c.poly.length) continue;
+      const seq=c.poly.map(r=>r.one).join(''); const key=c.type+':'+seq;
+      if(seen.has(key)){ seen.get(key).count++; seen.get(key).chains.push(c.id); continue; }
+      const e={type:c.type,seq,count:1,chains:[c.id],include:true}; seen.set(key,e); S.entities.push(e);
+    }
+    const lig=new Map();
+    for(const r of ligandsOf(M)){ const type=r.cls==='ion'?'ion':'ligand'; const key=type+':'+r.resn; if(lig.has(key)) lig.get(key).count++; else { const e={type,ccd:r.resn,count:1,include:r.cls!=='glycan'||true,smiles:''}; lig.set(key,e); S.entities.push(e); } }
+  }
+  renderEntities();
+}
+function renderEntities(){
+  const el=$('#ents');
+  if(!S.entities.length){ el.innerHTML='<p class="note">Load a structure or add sequences below.</p>'; renderJob(); return; }
+  el.innerHTML=S.entities.map((e,i)=>`<div class="ent"><input type="checkbox" id="ent-in-${i}" data-i="${i}" data-f="include" ${e.include?'checked':''} aria-label="Include">
+    <label for="ent-in-${i}"><b>${e.type==='protein'?'Protein':e.type==='dna'?'DNA':e.type==='rna'?'RNA':e.type==='ion'?'Ion':'Ligand'}</b> ${e.chains?'· chain '+esc(e.chains.join(', ')):''} ${e.ccd?'· '+esc(e.ccd):''} ${e.seq?'· '+e.seq.length+' res':''}</label>
+    <span class="note">× <input type="number" min="1" max="50" id="ent-n-${i}" data-i="${i}" data-f="count" value="${e.count}" aria-label="Copies"> <button class="btn small" data-i="${i}" data-f="remove" aria-label="Remove entity">×</button></span>
+    ${e.seq?`<div class="s">${esc(e.seq)}</div>`:''}
+    ${e.type==='ligand'?`<input type="text" id="ent-s-${i}" data-i="${i}" data-f="smiles" placeholder="SMILES (needed for Chai-1; optional elsewhere)" value="${esc(e.smiles||'')}">`:''}</div>`).join('');
+  renderJob();
+}
+$('#ents').addEventListener('input',e=>{ const t=e.target; const i=+t.dataset.i; const en=S.entities[i]; if(!en) return; if(t.dataset.f==='include') en.include=t.checked; if(t.dataset.f==='count') en.count=Math.max(1,parseInt(t.value)||1); if(t.dataset.f==='smiles') en.smiles=t.value.trim(); renderJob(); });
+$('#ents').addEventListener('click',e=>{ const t=e.target.closest('[data-f="remove"]'); if(!t) return; S.entities.splice(+t.dataset.i,1); renderEntities(); });
+$('#addEntBtn').onclick=()=>{
+  const type=$('#addType').value; let v=$('#addSeq').value.trim(); if(!v) return;
+  if(type==='smiles'){ S.entities.push({type:'ligand',ccd:'',smiles:v,count:1,include:true}); }
+  else if(type==='ligand'||type==='ion'){ S.entities.push({type,ccd:v.toUpperCase().replace(/^CCD_/,''),count:1,include:true,smiles:''}); }
+  else { const recs=v.includes('>')?v.split(/^>/m).filter(Boolean).map(b=>b.split('\n').slice(1).join('')):[v]; for(const r of recs){ const seq=r.replace(/[^A-Za-z]/g,'').toUpperCase(); if(seq) S.entities.push({type,seq,count:1,include:true}); } }
+  $('#addSeq').value=''; renderEntities();
+};
+function chainLetters(n){ const out=[]; for(let i=0;i<n;i++){ let s='',k=i; do{ s=String.fromCharCode(65+k%26)+s; k=Math.floor(k/26)-1; }while(k>=0); out.push(s);} return out; }
+function renderJob(){
+  const fmt=$('#fmt').value; const name=($('#jobName').value||'fold_lens_job').replace(/[^\w.-]+/g,'_');
+  const ents=S.entities.filter(e=>e.include); const warn=[];
+  let out='';
+  const total=ents.reduce((s,e)=>s+e.count,0); const ids=chainLetters(total); let k=0; const take=n=>ids.slice(k,k+=n);
+  $('#affWrap').hidden = fmt!=='boltz';
+  if(fmt==='af3'){
+    const seqs=ents.map(e=>{ const id=take(e.count); const idv=id.length===1?id[0]:id;
+      if(e.type==='protein') return {protein:{id:idv,sequence:e.seq}};
+      if(e.type==='dna') return {dna:{id:idv,sequence:e.seq}};
+      if(e.type==='rna') return {rna:{id:idv,sequence:e.seq}};
+      if(e.smiles) return {ligand:{id:idv,smiles:e.smiles}};
+      return {ligand:{id:idv,ccdCodes:[e.ccd]}}; });
+    out=JSON.stringify({name,modelSeeds:[1],sequences:seqs,dialect:'alphafold3',version:2},null,2);
+    $('#runLink').href='https://github.com/google-deepmind/alphafold3'; $('#runLink').textContent='AlphaFold 3 on GitHub';
+  } else if(fmt==='afserver'||fmt==='protenix'){
+    const seqs=[];
+    for(const e of ents){
+      if(e.type==='protein') seqs.push({proteinChain:{sequence:e.seq,count:e.count}});
+      else if(e.type==='dna') seqs.push({dnaSequence:{sequence:e.seq,count:e.count}});
+      else if(e.type==='rna') seqs.push({rnaSequence:{sequence:e.seq,count:e.count}});
+      else if(e.type==='ion'){ if(fmt==='afserver'&&!AFSERVER_IONS.has(e.ccd)){ warn.push(`AlphaFold Server does not offer the ion ${e.ccd}; left out.`); continue; } seqs.push({ion:{ion:e.ccd,count:e.count}}); }
+      else { if(fmt==='afserver'){ if(!AFSERVER_LIGANDS.has(e.ccd)){ warn.push(`AlphaFold Server only offers a fixed ligand list (ATP, ADP, GTP, HEM, NAD, FAD…); ${e.ccd||'this SMILES ligand'} was left out. Use AlphaFold 3, Boltz or Chai-1 for arbitrary ligands.`); continue; } seqs.push({ligand:{ligand:'CCD_'+e.ccd,count:e.count}}); }
+        else seqs.push({ligand:{ligand:e.smiles||('CCD_'+e.ccd),count:e.count}}); }
+    }
+    out=JSON.stringify(fmt==='afserver'?[{name,modelSeeds:[],sequences:seqs,dialect:'alphafoldserver',version:1}]:[{name,sequences:seqs}],null,2);
+    $('#runLink').href=fmt==='afserver'?'https://alphafoldserver.com':'https://github.com/bytedance/Protenix'; $('#runLink').textContent=fmt==='afserver'?'Open AlphaFold Server':'Protenix on GitHub';
+  } else if(fmt==='boltz'){
+    const L=['version: 1','sequences:']; let firstLig=null;
+    for(const e of ents){ const id=take(e.count); const idv=id.length===1?id[0]:'['+id.join(', ')+']';
+      if(['protein','dna','rna'].includes(e.type)) L.push(`  - ${e.type}:`,`      id: ${idv}`,`      sequence: ${e.seq}`);
+      else { L.push('  - ligand:',`      id: ${idv}`, e.smiles?`      smiles: '${e.smiles}'`:`      ccd: ${e.ccd}`); if(!firstLig&&e.type==='ligand') firstLig=id[0]; } }
+    if($('#affinity').checked){ if(firstLig) L.push('properties:','  - affinity:',`      binder: ${firstLig}`); else warn.push('Affinity needs a ligand entity.'); }
+    out=L.join('\n')+'\n';
+    warn.push('Run with: boltz predict '+name+'.yaml --use_msa_server');
+    $('#runLink').href='https://github.com/jwohlwend/boltz'; $('#runLink').textContent='Boltz on GitHub';
+  } else if(fmt==='chai'){
+    const L=[]; for(const e of ents){ const id=take(e.count); for(const one of id){
+      if(['protein','dna','rna'].includes(e.type)) L.push(`>${e.type}|name=${one}`,e.seq);
+      else if(e.smiles) L.push(`>ligand|name=${one}`,e.smiles);
+      else { warn.push(`Chai-1 needs a SMILES string for ${e.ccd}; paste it in the entity card.`); break; } } }
+    out=L.join('\n')+'\n';
+    $('#runLink').href='https://lab.chaidiscovery.com'; $('#runLink').textContent='Chai Discovery lab';
+  } else if(fmt==='colabfold'){
+    const prot=[]; for(const e of ents){ if(e.type==='protein') for(let i=0;i<e.count;i++) prot.push(e.seq); else warn.push(`ColabFold (AF2) folds proteins only; ${e.type} ${e.ccd||''} left out.`); }
+    out=`>${name}\n${prot.join(':')}\n`;
+    $('#runLink').href='https://colab.research.google.com/github/sokrypton/ColabFold/blob/main/AlphaFold2.ipynb'; $('#runLink').textContent='Open the ColabFold notebook';
+  }
+  $('#jobOut').value=ents.length?out:''; $('#jobWarn').textContent=[...new Set(warn)].join(' ');
+}
+$('#fmt').onchange=renderJob; $('#jobName').oninput=renderJob; $('#affinity').onchange=renderJob;
+$('#copyJob').onclick=async()=>{ const t=$('#jobOut'); try{ await navigator.clipboard.writeText(t.value); toast('Copied'); }catch(e){ t.select(); toast('Selected; press Ctrl/Cmd+C'); } };
+$('#saveJob').onclick=async()=>{ const fmt=$('#fmt').value; const name=($('#jobName').value||'fold_lens_job').replace(/[^\w.-]+/g,'_'); const ext={af3:'.json',afserver:'.json',protenix:'.json',boltz:'.yaml',chai:'.fasta',colabfold:'.fasta'}[fmt]; toast(await saveFile(name+ext,$('#jobOut').value,'text/plain')); };
+
+/* ============================== help ============================== */
+$('#p-help').innerHTML=`<section class="sec"><h3>Talk to the viewer</h3><p>Type what you want in everyday words. Chain several steps with “then” or “and”. The built-in parser runs instantly and offline; switch to <b>Claude</b> (when available) for open questions like “which residues anchor the ligand and are they well predicted?”. Anything the parser can't place is handed to Claude automatically.</p></section>
+<section class="sec"><h3>Examples</h3><dl>
+<dt>show chain A as cartoon and chain B as sticks</dt><dd>Representations: cartoon, sticks, ball and stick, spheres, lines, trace.</dd>
+<dt>color by plddt · color chain B by rainbow · make the helices red</dt><dd>Schemes: chain, pLDDT, PAE, B-factor, rainbow, secondary structure, hydrophobicity, residue type, element, model.</dd>
+<dt>highlight residues 45-60 in orange</dt><dd>Sticks, colour, labels for short stretches, and a zoom.</dd>
+<dt>show the binding site of ZYB and label it</dt><dd>Residues within 5 Å of the ligand. “it” refers to your last selection.</dd>
+<dt>show contacts between chain A and chain C</dt><dd>Residues within 4 Å, polar contacts ≤ 3.5 Å drawn as dashes.</dd>
+<dt>surface the protein colored by hydrophobicity, transparent</dt><dd>Molecular, solvent-accessible (SAS) or van der Waals surfaces.</dd>
+<dt>distance between A:57 CA and the ligand</dt><dd>Atoms, residues (Cα) or centroids.</dd>
+<dt>hide very low confidence · list residues with plddt &lt; 60</dt><dd>Confidence-aware selections on predicted models.</dd>
+<dt>color by pae relative to chain B</dt><dd>How confidently each residue is placed relative to a region.</dd>
+<dt>align model 2 onto model 1</dt><dd>Cα superposition with sequence alignment when numbering differs; reports RMSD.</dd>
+<dt>delete waters · move chain B 10 Å along x · export pdb</dt><dd>Edits stay in the session; export writes the current coordinates.</dd>
+<dt>what ligands are there? · sequence of chain A · how many cysteines</dt><dd>Answered from the loaded data.</dd>
+<dt>spin · stop spinning · rotate 90 about x · background black · reset</dt><dd>View controls.</dd></dl></section>
+<section class="sec"><h3>Selections</h3><p>chain A · residues 10-20 · A:57 · His57 · K48 · ligands · ions · glycans · water · protein · DNA · RNA · backbone · side chains · helices · strands · loops · hydrophobic / polar / charged / aromatic residues · cysteines · binding site of X · interface between chain A and chain B · within 6 Å of X · low confidence · plddt &lt; 50 · first 20 residues · N-terminus · model 2 · any residue name (HEM, ATP, ZYB…). Combine with “and”, “in”, “except”.</p></section>
+<section class="sec"><h3>Mouse</h3><p>Drag to rotate, scroll or pinch to zoom, right-drag or Ctrl-drag to pan. Click an atom to label its residue; hover for details.</p></section>`;
+
+/* ============================== tabs, files, boot ============================== */
+function openTab(id){ document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.pane===id)); document.querySelectorAll('.pane').forEach(p=>p.hidden=p.id!==id); try{localStorage.setItem('foldlens-tab',id);}catch(e){} }
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.pane));
+$('#openBtn').onclick=()=>$('#fileIn').click();
+$('#fileIn').onchange=e=>{ loadFiles(e.target.files); e.target.value=''; };
+$('#fetchBtn').onclick=()=>fetchById($('#fetchId').value);
+$('#fetchId').addEventListener('keydown',e=>{ if(e.key==='Enter') fetchById($('#fetchId').value); });
+$('#pasteBtn').onclick=()=>{ const t=$('#pasteTxt').value; if(!t.trim()) return; try{ const M=addStructure(t,'pasted'); afterLoad(); logMsg('viewer',describeLoaded(M)); $('#pasteTxt').value=''; }catch(e){ logMsg('err',e.message); } };
+document.querySelectorAll('[data-sample]').forEach(b=>b.onclick=()=>loadSample(b.dataset.sample));
+let dragDepth=0;
+addEventListener('dragenter',e=>{ if([...(e.dataTransfer?.types||[])].includes('Files')){ dragDepth++; $('#drop').hidden=false; } });
+addEventListener('dragleave',()=>{ dragDepth=Math.max(0,dragDepth-1); if(!dragDepth) $('#drop').hidden=true; });
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; $('#drop').hidden=true; if(e.dataTransfer?.files?.length) loadFiles(e.dataTransfer.files); });
+addEventListener('paste',e=>{ if(e.target.closest('input,textarea')) return; const t=e.clipboardData?.getData('text'); if(t&&detectFormat(t)){ try{ const M=addStructure(t,'pasted'); afterLoad(); logMsg('viewer',describeLoaded(M)); }catch(err){ logMsg('err',err.message); } } });
+
+(async function boot(){
+  try{ const t=localStorage.getItem('foldlens-tab'); if(t&&document.getElementById(t)) openTab(t); }catch(e){}
+  refreshAll(); renderEntities();
+  if(!initViewer()) return;
+  await loadSample('4CUP.cif');
+  if(window.claude && typeof window.claude.use==='function'){
+    claude.use('sample').then(s=>{ if(s){ S.sample=s; $('#modeClaude').disabled=false; $('#modeClaude').title='Ask Claude to interpret and answer (uses your Claude usage)'; } }).catch(()=>{});
+    claude.use('downloads').then(d=>{ if(d) S.downloads=d; }).catch(()=>{});
+  }
+})();
+</script>
