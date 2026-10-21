@@ -291,13 +291,17 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         </section>
 
         <section class="block">
-          <h3>Extract from patent text</h3>
-          <p class="help">Paste an examples / assay-table section of a patent. The parser pulls <b>compound identifiers</b> and reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values and merges them onto matching compounds (or adds data-only rows). Structures come from SMILES or from an image OCSR step — see the note below.</p>
+          <h3>Extract from a patent</h3>
+          <p class="help"><b>Upload a patent PDF</b> and the tool reads every page of text, then pulls <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values, and any machine-readable <b>SMILES</b> printed in tables or the supporting information (each validated with RDKit). Compounds with a SMILES are decomposed and plotted immediately; the rest are kept as data-only rows to attach a structure to. You can also paste a text excerpt instead.</p>
           <div class="datarow">
-            <textarea id="patentArea" spellcheck="false" placeholder="Example 14. … the compound showed a DC50 of 12 nM and a Dmax of 88%.&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
-            <div class="inline"><button class="btn small primary" id="patentBtn">Extract data</button></div>
+            <div class="inline">
+              <label class="btn small primary" style="cursor:pointer">Upload patent PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
+              <button class="btn small" id="patentBtn">Extract from pasted text</button>
+              <span id="pdfProgress" class="help"></span>
+            </div>
+            <textarea id="patentArea" spellcheck="false" placeholder="…or paste an excerpt: Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
           </div>
-          <p class="help" style="margin-top:4px">Converting a drawn structure in a patent image to SMILES needs optical chemical-structure recognition (e.g. <code>DECIMER</code> or <code>MolScribe</code>), which runs as a separate step; paste its SMILES output here or into the CSV. Chemical names can be resolved to SMILES with <code>OPSIN</code> or PubChem when this page is opened in a normal browser tab.</p>
+          <p class="help" style="margin-top:4px"><b>Drawn structures that appear only as images</b> are not auto-recognised in the browser: converting a picture to SMILES needs optical chemical-structure recognition (<code>DECIMER</code> / <code>MolScribe</code>). Run the bundled <code>tools/patent_to_csv.py</code> companion for full image→structure extraction, then load its CSV here. Chemical names resolve to SMILES via <code>OPSIN</code> or PubChem in a normal browser tab.</p>
         </section>
 
         <div id="dataStatus"></div>
@@ -307,6 +311,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.js"></script>
+<script src="./pdf.min.js"></script>
 <script>
 "use strict";
 /* ============================ constants & sample set ============================ */
@@ -488,7 +493,9 @@ function depict(c,{w=250,h=180,regions=true,extraSmarts=""}={}){
     det.atoms=atoms; det.bonds=bonds; det.highlightAtomColors=aCol; det.highlightBondColors=bCol;
     let svg=m.get_svg_with_highlights(JSON.stringify(det));
     const ink=structInkHex();
-    svg=svg.replace(/#000000/gi,ink).replace(/#FFFFFF/gi,"transparent");
+    // bonds/black text -> theme ink; the transparent background rect comes back as
+    // the 8-digit hex #FFFFFF00, so match an optional alpha and map white to none.
+    svg=svg.replace(/#000000/gi,ink).replace(/#FFFFFF([0-9A-Fa-f]{2})?/gi,"none");
     return svg;
   }) || `<div class="empty">no structure</div>`;
 }
@@ -802,19 +809,51 @@ function parseSDF(text){
     rows.push({id:name,name,series:"imported",smiles,data}); });
   return rows;
 }
-function parsePatentText(text){
-  // pull "Example N" or "Compound N" identifiers with nearby DC50 / IC50 / Dmax values
-  const rows=[]; const re=/(?:example|compound|cpd)\s*[:#]?\s*([0-9]+[a-z]?)/gi; let m; const found={};
-  const segments=text.split(/(?=(?:example|compound|cpd)\s*[:#]?\s*[0-9])/i);
-  segments.forEach(seg=>{ const idm=seg.match(/(?:example|compound|cpd)\s*[:#]?\s*([0-9]+[a-z]?)/i); if(!idm)return;
-    const id="Example "+idm[1]; const data={};
-    const dc=seg.match(/dc\s*50[^0-9]{0,8}([0-9.]+)\s*(nm|µm|um|pm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
-    const ic=seg.match(/ic\s*50[^0-9]{0,8}([0-9.]+)\s*(nm|µm|um|pm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
-    const dmax=seg.match(/d\s*max[^0-9]{0,8}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
-    const smi=seg.match(/SMILES[:\s]+([^\s]+)/i);
-    if(Object.keys(data).length||smi) rows.push({id,name:id,series:"patent",smiles:smi?smi[1]:"",data}); });
-  return rows;
-  function conv(v,u){ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="pm")return v/1000; return v; }
+function molCandidate(t){ return t.length>=8 && /[0-9()]/.test(t) && /^[A-Za-z0-9@+\-\[\]()=#$%\/\\.]+$/.test(t) && (t.match(/[A-Z]/g)||[]).length>=2; }
+function validSmiles(t,min){ min=min||8;
+  for(const cand of [t, t.replace(/[.,;:]+$/,"")]){ if(!cand) continue;
+    const m=state.rdkit.get_mol(cand); let ok=false,can=null;
+    try{ ok=m&&m.is_valid()&&m.get_num_atoms()>=min; can=ok?m.get_smiles():null; }catch(e){}
+    if(m) m.delete(); if(ok) return can; }
+  return null; }
+function findSmilesInText(seg){
+  const lab=seg.match(/SMILES\s*[:=]\s*([^\s,;]+)/i); if(lab){ const c=validSmiles(lab[1],4); if(c) return c; }
+  const toks=seg.split(/[\s,;]+/);
+  for(const t of toks){ if(molCandidate(t)){ const c=validSmiles(t,8); if(c) return c; } }
+  return ""; }
+function extractPatentRecords(text){
+  const rows=[];
+  const segs=text.split(/(?=(?:example|compound|cpd)\s*[:#.]?\s*[0-9])/i);
+  const conv=(v,u)=>{ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="mm")return v*1e6; if(u==="pm")return v/1000; return v; };
+  segs.forEach(seg=>{ const idm=seg.match(/(?:example|compound|cpd)\s*[:#.]?\s*([0-9]+[a-z]?)/i); if(!idm) return;
+    const label=idm[0].replace(/\s+/g," ").replace(/[:#.]/g,"").trim();
+    const id=label.charAt(0).toUpperCase()+label.slice(1);
+    const data={};
+    const dc=seg.match(/dc\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
+    const ic=seg.match(/ic\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
+    const ec=seg.match(/ec\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ec)data.ec50_nm=conv(ec[1],ec[2]);
+    const dmax=seg.match(/d\s*max[^0-9]{0,10}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
+    const smiles=findSmilesInText(seg);
+    if(Object.keys(data).length||smiles) rows.push({id,name:id,series:"patent",smiles,data}); });
+  return rows; }
+async function extractFromPDF(file){
+  const prog=$("#pdfProgress");
+  if(!window.pdfjsLib){ setStatus("PDF reader did not load — reload the page and try again.",false); return; }
+  prog.textContent="Reading "+file.name+"…";
+  try{
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
+    let text="";
+    for(let p=1;p<=pdf.numPages;p++){ prog.textContent=`Scanning page ${p} / ${pdf.numPages}…`;
+      const page=await pdf.getPage(p); const tc=await page.getTextContent();
+      text += tc.items.map(i=>i.str).join(" ")+"\n"; if(page.cleanup)page.cleanup(); }
+    prog.textContent="";
+    const rows=extractPatentRecords(text);
+    if(!rows.length){ setStatus(`Read ${pdf.numPages} page(s) of ${esc(file.name)}, but found no compound identifiers, assay values, or machine-readable SMILES. The structures are likely drawn as images — use the OCSR companion below.`,false); return; }
+    const withStruct=rows.filter(r=>r.smiles).length;
+    const r=addCompounds(rows);
+    setStatus(`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} records (${withStruct} with a SMILES). Added ${r.added} structures, merged onto ${r.merged}, ${r.dataOnly} data-only. Any drawn-only structures need the OCSR companion.`, r.bad===0);
+  }catch(e){ prog.textContent=""; setStatus("PDF error: "+e.message,false); }
 }
 
 /* ============================ wiring ============================ */
@@ -872,7 +911,8 @@ function bindUI(){
   $("#parseBtn").onclick=()=>doParse(false);
   $("#replaceBtn").onclick=()=>doParse(true);
   $("#loadSample").onclick=()=>{ setWarhead(DEFAULT_WARHEAD); $("#warheadIn").value=DEFAULT_WARHEAD; const r=addCompounds(sampleRows(),{replace:true}); setStatus(`Loaded ${r.added} sample compounds.`); };
-  $("#patentBtn").onclick=()=>{ const rows=parsePatentText($("#patentArea").value); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
+  $("#pdfIn").onchange=e=>{ const f=e.target.files[0]; if(f) extractFromPDF(f); e.target.value=""; };
+  $("#patentBtn").onclick=()=>{ const rows=extractPatentRecords($("#patentArea").value); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
     const r=addCompounds(rows); setStatus(`Patent text: extracted ${rows.length} record(s) — ${r.added} with structure, merged onto ${r.merged}, ${r.dataOnly} kept as data-only (see Table). Attach a structure by matching the identifier.`); };
   $("#fileIn").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
     rd.onload=()=>{ const t=rd.result; const name=f.name.toLowerCase();
@@ -893,6 +933,7 @@ function doParse(replace){
 
 /* ============================ boot ============================ */
 function boot(){
+  if(window.pdfjsLib){ try{ pdfjsLib.GlobalWorkerOptions.workerSrc="./pdf.worker.min.js"; }catch(e){} }
   state.qmolAnchors=E3_ANCHORS.map(a=>{ const q=state.rdkit.get_qmol(a.smarts); return (q&&q.is_valid())?q:null; });
   setWarhead(DEFAULT_WARHEAD);
   addCompounds(sampleRows(),{replace:true});

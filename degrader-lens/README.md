@@ -28,11 +28,14 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   linker-length SAR (an optimum, not a slope).
 - **Data table.** Sortable, with DC₅₀ shaded by potency; copy the whole set as CSV
   or SMILES.
-- **Ingestion & extraction.** Load the bundled sample set, paste or upload **CSV**
+- **Upload a patent PDF.** The app reads every page of text (via PDF.js) and pulls
+  compound identifiers, reported IC₅₀ / DC₅₀ / EC₅₀ / Dmax values, and any
+  machine-readable **SMILES** printed in tables or the SI — each validated with
+  RDKit. Compounds with a SMILES are decomposed and plotted immediately; the rest
+  are kept as data-only rows to attach a structure to later.
+- **Other ingestion.** Load the bundled sample set, paste or upload **CSV**
   (`id, smiles, dc50_nm, dmax_pct, …`), a **SMILES list**, or an **SDF**; set the
-  warhead scaffold; and run the **patent-text extractor**, which pulls compound
-  identifiers and reported IC₅₀ / DC₅₀ / Dmax values and merges them onto matching
-  compounds (unmatched values are kept as data-only rows).
+  warhead scaffold; or paste a patent text excerpt.
 
 ## Running it
 
@@ -75,15 +78,34 @@ the reported numbers follow the characteristic bell-shaped linker–degradation
 relationship, but they are synthetic demonstration data, not measurements of any
 specific disclosed compound. Replace them with your own via the **Data** tab.
 
-## Scope and limitations
+## Patent PDFs: what is and isn't automatic
 
-- Turning a **drawn structure in a patent image** into SMILES needs optical
-  chemical-structure recognition (e.g. `DECIMER`, `MolScribe`); run that as a
-  separate step and paste its SMILES output here or into a CSV. In-browser OCSR is
-  not attempted, and the tool is honest about that rather than guessing structures.
+Uploading a PDF gets you everything that is in the document as **text**:
+identifiers, assay values, and machine-readable SMILES (common in modern patent
+tables and SI). For those compounds you get structures + SAR straight from the PDF.
+
+A structure that appears **only as a drawing** (an image) cannot be turned into a
+SMILES in the browser — that needs optical chemical-structure recognition, which
+is an ML model. For image-only patents, run the bundled companion:
+
+```
+pip install pypdf rdkit                       # text + data + inline SMILES
+python tools/patent_to_csv.py patent.pdf -o compounds.csv
+
+pip install "decimer>=2.3" pdf2image pillow   # add OCSR for drawn structures
+python tools/patent_to_csv.py patent.pdf -o compounds.csv --ocsr
+```
+
+It writes a CSV in this tool's format; load it in the **Data** tab. The tool is
+deliberately honest about this boundary rather than guessing structures from
+pictures.
+
+## Other limitations
 - Fully automatic warhead/linker splitting of an arbitrary molecule is a hard
   problem; region-based SAR is accurate when a shared warhead scaffold is supplied.
 - Descriptors are 2D/topological estimates (cLogP is Crippen), not measured values.
 
 Structure handling uses [RDKit.js](https://github.com/rdkit/rdkit-js) 2025.3.4
-(RDKit 2025.03). PDB-free, offline-capable once the WASM module is cached.
+(RDKit 2025.03); PDF reading uses [PDF.js](https://mozilla.github.io/pdf.js/)
+3.11.174. Both are bundled as same-origin files (`RDKit_minimal.wasm`,
+`pdf.min.js`, `pdf.worker.min.js`), so the page works offline once loaded.
