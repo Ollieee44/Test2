@@ -1,0 +1,910 @@
+<meta charset="utf-8">
+<title>Degrader Lens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Extract, decompose and visualise heterobifunctional degraders and molecular glues alongside their biological SAR.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen instrument. Left = compound gallery with search/filter; right = tabbed
+   inspector (Compound · SAR · Table · Data). Stacks to one column on phones. */
+:root{
+  --bg:#eceef2; --panel:#ffffff; --panel-2:#f3f5f9; --ink:#141a22; --muted:#5a6675; --line:#d7dde6;
+  --accent:#5a3ff0; --accent-ink:#ffffff; --accent-soft:#ece7fe; --stage:#fbfcfe;
+  --ok:#1f7a4d; --warn:#9a5b00; --bad:#b4232c;
+  /* degrader region colours (also mirrored in JS REGION) */
+  --reg-war:#0e9e8c; --reg-lnk:#dd8318; --reg-e3:#7c5cff;
+  --reg-war-soft:#d8f3ef; --reg-lnk-soft:#fbecd6; --reg-e3-soft:#ece7fe;
+  /* categorical series (dataviz light steps: blue / orange / violet / aqua) */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#6250d6; --s4:#1baf7a; --s5:#e87ba4;
+  --struct-ink:#1a222c;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:9px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0c1016; --panel:#141b24; --panel-2:#1a222d; --ink:#e5ebf2; --muted:#8c9aab; --line:#27313d;
+  --accent:#9a84ff; --accent-ink:#120a2e; --accent-soft:#241a46; --stage:#0a0e13;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178;
+  --reg-war:#2fd0bc; --reg-lnk:#f0a44a; --reg-e3:#a78bff;
+  --reg-war-soft:#0f322e; --reg-lnk-soft:#33260f; --reg-e3-soft:#211a3e;
+  --s1:#3987e5; --s2:#eb6834; --s3:#9085e9; --s4:#199e70; --s5:#d55181;
+  --struct-ink:#e5ebf2;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0c1016; --panel:#141b24; --panel-2:#1a222d; --ink:#e5ebf2; --muted:#8c9aab; --line:#27313d;
+  --accent:#9a84ff; --accent-ink:#120a2e; --accent-soft:#241a46; --stage:#0a0e13;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178;
+  --reg-war:#2fd0bc; --reg-lnk:#f0a44a; --reg-e3:#a78bff;
+  --reg-war-soft:#0f322e; --reg-lnk-soft:#33260f; --reg-e3-soft:#211a3e;
+  --s1:#3987e5; --s2:#eb6834; --s3:#9085e9; --s4:#199e70; --s5:#d55181;
+  --struct-ink:#e5ebf2;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{text-wrap:balance}
+.tnum{font-variant-numeric:tabular-nums}
+
+.app{height:100%;display:grid;grid-template-rows:auto 1fr;
+  padding-left:max(12px,env(safe-area-inset-left,0px));
+  padding-right:max(12px,env(safe-area-inset-right,0px));
+  padding-block:10px;gap:10px}
+
+header{display:flex;align-items:center;gap:12px 14px;flex-wrap:wrap;min-width:0}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto;min-width:0}
+.brand h1{font:700 22px/1 var(--f-display);letter-spacing:-.015em;margin:0;white-space:nowrap}
+.brand span{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hstat{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+.hstat b{color:var(--ink);font-weight:600}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:6px 11px;font-weight:500;font-size:13px;line-height:1.2;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:3px 8px;font-size:12px}
+.btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+
+.grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(360px,1.25fr);gap:10px;min-height:0}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* ---- gallery ---- */
+.gtools{padding:10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.search{display:flex;gap:6px}
+.search input{flex:1;min-width:0;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:7px 9px;font:12.5px var(--f-mono)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted)}
+.chip[aria-pressed="true"]{color:var(--ink);border-color:var(--accent);background:var(--accent-soft)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);align-items:center}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:4px;vertical-align:-1px}
+.gscroll{overflow:auto;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;align-content:start}
+.card{border:1px solid var(--line);border-radius:8px;background:var(--stage);padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-width:0}
+.card:hover{border-color:var(--muted)}
+.card[aria-selected="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.bad{opacity:.6}
+.card .depict{height:112px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.card .depict svg{max-width:100%;max-height:100%;height:auto}
+.card .cid{font:600 12.5px var(--f-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .crow{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.badge{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:5px;letter-spacing:.02em;white-space:nowrap}
+.badge.crbn{background:color-mix(in srgb,var(--s1) 18%,transparent);color:var(--s1)}
+.badge.vhl{background:color-mix(in srgb,var(--s2) 20%,transparent);color:var(--s2)}
+.badge.mdm2{background:color-mix(in srgb,var(--s3) 20%,transparent);color:var(--s3)}
+.badge.dcaf15{background:color-mix(in srgb,var(--s4) 20%,transparent);color:var(--s4)}
+.badge.none{background:var(--panel-2);color:var(--muted)}
+.potency{font:600 11px var(--f-mono);padding:1px 6px;border-radius:5px;background:var(--panel-2)}
+
+/* ---- inspector ---- */
+.tabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{border:1px solid transparent;border-bottom:none;background:transparent;border-radius:7px 7px 0 0;padding:7px 13px;font-weight:500;font-size:13px;color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--panel-2);border-color:var(--line)}
+.pane{overflow:auto;padding:14px;min-height:0;flex:1}
+.pane h2{font:600 15px var(--f-display);margin:0 0 2px}
+.pane .sub{color:var(--muted);font-size:12px;margin:0 0 12px}
+section.block{margin-bottom:16px}
+section.block>h3{font:600 11px var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+
+.detailtop{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;align-items:start}
+.bigdepict{background:var(--stage);border:1px solid var(--line);border-radius:8px;padding:8px;min-height:220px;display:flex;align-items:center;justify-content:center}
+.bigdepict svg{max-width:100%;height:auto}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-weight:500}
+.decomp{display:flex;flex-direction:column;gap:7px}
+.region{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+.region .swatch{width:12px;height:12px;border-radius:3px;flex:none}
+.region .rname{font-weight:600;font-size:12.5px}
+.region .rmeta{color:var(--muted);font-size:11.5px}
+.props{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.prop{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+.prop .pl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.prop .pv{font:600 15px var(--f-mono)}
+.prop .pv small{font-size:10px;color:var(--muted);font-weight:500}
+.prop.flag .pv{color:var(--warn)}
+.bio{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.bio .prop .pv{color:var(--accent)}
+
+.hl-ctrl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.hl-ctrl input{flex:1;min-width:120px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 8px;font:12px var(--f-mono)}
+
+/* ---- chart ---- */
+.chart-ctrls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.field select{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 8px;font-size:12.5px}
+.chartwrap{position:relative;border:1px solid var(--line);border-radius:8px;background:var(--stage);padding:6px}
+.chartwrap svg{display:block;width:100%;height:auto}
+.chart-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:8px;color:var(--ink)}
+.chart-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px}
+.note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,.18);min-width:120px;z-index:5;transition:opacity .08s}
+.tip b{font:600 12.5px var(--f-mono)}
+.tip .trow{color:var(--muted);display:flex;justify-content:space-between;gap:14px}
+.tip .trow span{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ---- table ---- */
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--panel-2);cursor:pointer;font-weight:600;user-select:none;z-index:1}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--panel)}
+th:first-child{z-index:2}
+th:nth-child(2),td:nth-child(2){text-align:left}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--panel-2)}
+tbody tr[aria-selected="true"] td{background:var(--accent-soft)}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.pcell{border-radius:5px;padding:1px 7px;font-family:var(--f-mono);font-weight:600}
+
+/* ---- data tab ---- */
+.datarow{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+.datarow textarea{width:100%;min-height:92px;border:1px solid var(--line);background:var(--panel-2);border-radius:8px;padding:9px;font:12px/1.5 var(--f-mono);resize:vertical}
+.inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.inline input[type=text]{flex:1;min-width:160px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 9px;font:12px var(--f-mono)}
+.status{font-size:12px;border-radius:7px;padding:8px 10px;line-height:1.5}
+.status.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);color:var(--ok)}
+.status.err{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
+.help{font-size:12px;color:var(--muted);line-height:1.55}
+.help code{font-family:var(--f-mono);background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+
+.boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;flex-direction:column;gap:14px;text-align:center;padding:24px}
+.boot h1{font:700 26px var(--f-display);margin:0;letter-spacing:-.02em}
+.boot p{color:var(--muted);margin:0;max-width:30ch}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.empty{color:var(--muted);font-size:13px;padding:30px 10px;text-align:center;line-height:1.6}
+
+@media (max-width:860px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%;grid-template-rows:auto auto auto}
+  .grid{grid-template-columns:1fr}
+  .col{min-height:0}
+  .gscroll{max-height:none}
+  .detailtop{grid-template-columns:1fr}
+}
+</style>
+
+<div class="boot" id="boot">
+  <div class="spin" aria-hidden="true"></div>
+  <h1>Degrader Lens</h1>
+  <p id="bootmsg">Loading the chemistry engine…</p>
+</div>
+
+<div class="app" id="app" hidden>
+  <header>
+    <div class="brand">
+      <h1>Degrader Lens</h1>
+      <span id="tagline">heterobifunctional degraders &amp; molecular glues — structure + SAR</span>
+    </div>
+    <div class="hstat"><span><b id="nValid">0</b> compounds</span><span id="nBad"></span></div>
+    <button class="btn small" id="btnTheme" title="Toggle light / dark">Theme</button>
+  </header>
+
+  <div class="grid">
+    <!-- GALLERY -->
+    <div class="col">
+      <div class="gtools">
+        <div class="search">
+          <input id="q" placeholder="SMARTS or text filter (e.g. c1ccccc1, VHL, DL-C4)" autocomplete="off" spellcheck="false">
+          <button class="btn small" id="qClear">Clear</button>
+        </div>
+        <div class="chips" id="e3chips"></div>
+        <div class="legend">
+          <span><i style="background:var(--reg-war)"></i>Warhead / target ligand</span>
+          <span><i style="background:var(--reg-lnk)"></i>Linker</span>
+          <span><i style="background:var(--reg-e3)"></i>E3 ligand</span>
+        </div>
+      </div>
+      <div class="gscroll" id="gallery"></div>
+    </div>
+
+    <!-- INSPECTOR -->
+    <div class="col">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="compound" aria-selected="true">Compound</button>
+        <button class="tab" role="tab" data-tab="sar">SAR</button>
+        <button class="tab" role="tab" data-tab="table">Table</button>
+        <button class="tab" role="tab" data-tab="data">Data</button>
+      </div>
+
+      <div class="pane" id="pane-compound" role="tabpanel"></div>
+
+      <div class="pane" id="pane-sar" role="tabpanel" hidden>
+        <h2>Structure–activity landscape</h2>
+        <p class="sub">Plot any measured or computed property against another. Degradation potency (DC<sub>50</sub>) is best read on a log axis.</p>
+        <div class="chart-ctrls" id="chartCtrls"></div>
+        <div class="chartwrap" id="chartWrap"><svg id="chart" viewBox="0 0 640 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="SAR scatter plot"></svg><div class="tip" id="tip" style="opacity:0"></div></div>
+        <div class="chart-legend" id="chartLegend"></div>
+        <div class="note" id="chartNote"></div>
+      </div>
+
+      <div class="pane" id="pane-table" role="tabpanel" hidden>
+        <div class="inline" style="margin-bottom:10px">
+          <h2 style="margin-right:auto">Data table</h2>
+          <button class="btn small" id="copyCsv">Copy CSV</button>
+          <button class="btn small" id="copySmi">Copy SMILES</button>
+        </div>
+        <div class="tablewrap"><table id="dataTable"><thead></thead><tbody></tbody></table></div>
+        <div class="note" id="tableNote"></div>
+      </div>
+
+      <div class="pane" id="pane-data" role="tabpanel" hidden>
+        <h2>Load &amp; extract compounds</h2>
+        <p class="sub">The structure engine runs entirely in your browser (RDKit WebAssembly). Nothing is uploaded.</p>
+
+        <section class="block">
+          <h3>Shared warhead / target-ligand scaffold</h3>
+          <p class="help">A SMARTS pattern for the common target-binding scaffold lets the tool split each degrader into <b>warhead · linker · E3 ligand</b> exactly and run region-based SAR. The E3 ligand is always detected automatically.</p>
+          <div class="inline" style="margin-top:7px">
+            <input type="text" id="warheadIn" placeholder="e.g. O=C(c1ccccc1)Nc1ccccc1" spellcheck="false">
+            <button class="btn small primary" id="applyWarhead">Apply</button>
+            <button class="btn small" id="clearWarhead">Auto-estimate only</button>
+          </div>
+        </section>
+
+        <section class="block">
+          <h3>Paste data</h3>
+          <div class="datarow">
+            <div class="inline">
+              <div class="field"><label for="fmt">Format</label>
+                <select id="fmt">
+                  <option value="csv">CSV (id, smiles, assay columns…)</option>
+                  <option value="smiles">SMILES list (one per line)</option>
+                  <option value="sdf">SDF / MOL block</option>
+                </select>
+              </div>
+              <button class="btn small primary" id="parseBtn">Parse &amp; add</button>
+              <button class="btn small" id="replaceBtn">Replace all</button>
+            </div>
+            <textarea id="pasteArea" spellcheck="false" placeholder="id,smiles,dc50_nm,dmax_pct&#10;CMPD-1,O=C(c1ccccc1)Nc1ccc(OCCNc2cccc3c2C(=O)N(C2CCC(=O)NC2=O)C3=O)cc1,120,74"></textarea>
+          </div>
+          <div class="inline">
+            <label class="btn small" style="cursor:pointer">Upload file…<input type="file" id="fileIn" accept=".csv,.tsv,.smi,.txt,.sdf,.mol" hidden></label>
+            <button class="btn small" id="loadSample">Reload sample set</button>
+          </div>
+        </section>
+
+        <section class="block">
+          <h3>Extract from patent text</h3>
+          <p class="help">Paste an examples / assay-table section of a patent. The parser pulls <b>compound identifiers</b> and reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values and merges them onto matching compounds (or adds data-only rows). Structures come from SMILES or from an image OCSR step — see the note below.</p>
+          <div class="datarow">
+            <textarea id="patentArea" spellcheck="false" placeholder="Example 14. … the compound showed a DC50 of 12 nM and a Dmax of 88%.&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
+            <div class="inline"><button class="btn small primary" id="patentBtn">Extract data</button></div>
+          </div>
+          <p class="help" style="margin-top:4px">Converting a drawn structure in a patent image to SMILES needs optical chemical-structure recognition (e.g. <code>DECIMER</code> or <code>MolScribe</code>), which runs as a separate step; paste its SMILES output here or into the CSV. Chemical names can be resolved to SMILES with <code>OPSIN</code> or PubChem when this page is opened in a normal browser tab.</p>
+        </section>
+
+        <div id="dataStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.js"></script>
+<script>
+"use strict";
+/* ============================ constants & sample set ============================ */
+const REGION = { war:{key:"war",label:"Warhead / target ligand",rgb:[0.055,0.62,0.55]},
+                 lnk:{key:"lnk",label:"Linker",rgb:[0.87,0.51,0.09]},
+                 e3 :{key:"e3", label:"E3 ligand",rgb:[0.49,0.36,1.0]} };
+
+// E3-ligase ligand anchors — SMARTS validated against reference ligands with RDKit.
+const E3_ANCHORS = [
+  { ligase:"CRBN",   name:"Glutarimide",          smarts:"O=C1CCCC(=O)N1",      note:"cereblon recruiter (thalidomide / lenalidomide / pomalidomide class)" },
+  { ligase:"VHL",    name:"Hydroxyprolinamide",   smarts:"OC1CC(NC1)C(=O)N",    note:"VHL recruiter (VH032 / VHL-1 class)" },
+  { ligase:"MDM2",   name:"Nutlin imidazoline",   smarts:"C1(c2ccccc2)N=C(c2ccccc2)N(C(=O)N)C1c1ccccc1", note:"MDM2 recruiter (nutlin class)" },
+  { ligase:"DCAF15", name:"Arylsulfonamide",      smarts:"O=S(=O)(N)c1ccccc1",  note:"DCAF15 recruiter (indisulam / sulfonamide glue class)" },
+];
+const DEFAULT_WARHEAD = "O=C(c1ccccc1)Nc1ccccc1"; // benzanilide warhead of the sample series
+
+const SAMPLE = [
+  ["DL-C1","Warhead–PEG1–pomalidomide","CRBN PEG series",520,66,34,"O=C1CCC(N2C(=O)c3cccc(NCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C2","Warhead–PEG2–pomalidomide","CRBN PEG series",110,72,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C3","Warhead–PEG3–pomalidomide","CRBN PEG series",18,78,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C4","Warhead–PEG4–pomalidomide","CRBN PEG series",6,84,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C5","Warhead–PEG5–pomalidomide","CRBN PEG series",25,90,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C6","Warhead–PEG6–pomalidomide","CRBN PEG series",140,96,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-V2","Warhead–PEG2–VH032","VHL PEG series",240,69,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V3","Warhead–PEG3–VH032","VHL PEG series",41,76,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V4","Warhead–PEG4–VH032","VHL PEG series",9,83,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V5","Warhead–PEG5–VH032","VHL PEG series",15,90,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V6","Warhead–PEG6–VH032","VHL PEG series",88,95,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["MG-1","Lenalidomide (CRBN glue)","Molecular glue",null,null,null,"Nc1cccc2c1C(=O)N(C1CCC(=O)NC1=O)C2"],
+  ["MG-2","Pomalidomide (CRBN glue)","Molecular glue",null,null,null,"Nc1cccc2c1C(=O)N(C1CCC(=O)NC1=O)C2=O"],
+  ["MG-3","Indisulam-like (DCAF15 glue)","Molecular glue",null,null,null,"Nc1ccc2cc(S(=O)(=O)Nc3cccc(Cl)c3)ccc2c1"],
+];
+function sampleRows(){
+  return SAMPLE.map(r=>({ id:r[0], name:r[1], series:r[2], smiles:r[6],
+    data:{ dc50_nm:r[3], dmax_pct:r[4], target_ic50_nm:r[5] } }));
+}
+
+/* field metadata for descriptors + known assays (label, unit, log-friendly) */
+const DESCRIPTOR_FIELDS = [
+  ["mw","MW","Da",false],["clogp","cLogP","",false],["tpsa","TPSA","Å²",false],
+  ["hbd","HBD","",false],["hba","HBA","",false],["rot","Rot. bonds","",false],
+  ["rings","Rings","",false],["fsp3","Fsp³","",false],["heavy","Heavy atoms","",false],
+  ["linker_len","Linker length","atoms",false],["linker_peg_o","Linker ethers","O",false],
+];
+const ASSAY_LABELS = { dc50_nm:["DC₅₀","nM",true], dmax_pct:["Dmax","%",false],
+  target_ic50_nm:["Target IC₅₀","nM",true], ec50_nm:["EC₅₀","nM",true],
+  ki_nm:["Ki","nM",true], kd_nm:["Kd","nM",true], ternary_kd_nm:["Ternary Kd","nM",true] };
+
+/* ============================ state ============================ */
+const state = {
+  rdkit:null, qmolAnchors:[], warheadSmarts:DEFAULT_WARHEAD, warheadQmol:null,
+  compounds:[], selectedId:null, tab:"compound",
+  filterE3:new Set(), query:"",
+  sort:{key:"id",dir:1}, hlSmarts:"",
+  chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
+};
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
+              set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+
+/* ============================ RDKit helpers ============================ */
+function withMol(smiles,fn){
+  const m=state.rdkit.get_mol(smiles);
+  try{ if(!m||!m.is_valid()) return null; return fn(m); }
+  finally{ if(m) m.delete(); }
+}
+function structInkHex(){ return getComputedStyle(document.documentElement).getPropertyValue('--struct-ink').trim()||'#1a222c'; }
+
+// Parse a V2000 molblock into graph (elements, bonds, ring atoms via bridge detection).
+function parseGraph(molblock){
+  const lines=molblock.split("\n");
+  const counts=lines[3];
+  const na=parseInt(counts.slice(0,3),10), nb=parseInt(counts.slice(3,6),10);
+  const el=[]; for(let i=0;i<na;i++){ el.push(lines[4+i].slice(31,34).trim()); }
+  const adj=Array.from({length:na},()=>[]); const bonds=[];
+  for(let i=0;i<nb;i++){ const L=lines[4+na+i];
+    const a=parseInt(L.slice(0,3),10)-1, b=parseInt(L.slice(3,6),10)-1;
+    adj[a].push(b); adj[b].push(a); bonds.push([a,b]); }
+  // bridge detection (iterative DFS) -> ring atoms = incident to any non-bridge bond
+  const disc=new Array(na).fill(-1), low=new Array(na).fill(0), ring=new Array(na).fill(false);
+  let t=0;
+  for(let s=0;s<na;s++){ if(disc[s]!==-1) continue;
+    const st=[[s,-1,0]];
+    while(st.length){ const fr=st[st.length-1]; const [u,parent,pi]=fr;
+      if(pi===0){ disc[u]=low[u]=t++; }
+      if(pi<adj[u].length){ fr[2]++; const v=adj[u][pi];
+        if(v===parent) continue;
+        if(disc[v]===-1){ st.push([v,u,0]); }
+        else { low[u]=Math.min(low[u],disc[v]); }
+      } else {
+        st.pop();
+        if(parent!==-1){ low[parent]=Math.min(low[parent],low[u]);
+          if(low[u]<=disc[parent]){ ring[u]=true; ring[parent]=true; } // non-bridge edge
+        }
+      }
+    }
+  }
+  return {na,el,adj,bonds,ring};
+}
+// multi-source BFS shortest path from any atom in A to any atom in B; returns full path (incl ends)
+function shortestPath(adj,setA,setB){
+  const prev=new Array(adj.length).fill(-2); const q=[];
+  for(const a of setA){ prev[a]=-1; q.push(a); }
+  const B=new Set(setB);
+  let hit=-1;
+  for(let h=0;h<q.length;h++){ const u=q[h];
+    if(B.has(u)){ hit=u; break; }
+    for(const v of adj[u]){ if(prev[v]===-2){ prev[v]=u; q.push(v); } }
+  }
+  if(hit===-1) return null;
+  const path=[]; let c=hit; while(c!==-1){ path.push(c); c=prev[c]; } return path.reverse();
+}
+
+// core per-compound analysis (creates a mol from canonical smiles, computes everything, frees it)
+function analyse(raw){
+  const rk=state.rdkit;
+  let probe=rk.get_mol(raw.smiles);
+  if(!probe||!probe.is_valid()){ if(probe)probe.delete();
+    return {...raw,valid:false,error:"SMILES could not be parsed"}; }
+  const canonical=probe.get_smiles(); probe.delete();
+  const m=rk.get_mol(canonical);
+  const out={...raw,valid:true,smiles:canonical,error:null};
+  try{
+    const d=JSON.parse(m.get_descriptors());
+    const pick=(...ks)=>{ for(const k of ks){ if(d[k]!=null) return d[k]; } return null; };
+    out.desc={
+      mw:round(pick("amw","exactmw"),1), clogp:round(pick("CrippenClogP"),2),
+      tpsa:round(pick("tpsa","TPSA"),1), hbd:pick("NumHBD","lipinskiHBD","NumHBA"),
+      hba:pick("NumHBA","lipinskiHBA"), rot:pick("NumRotatableBonds"),
+      rings:pick("NumRings"), fsp3:round(pick("FractionCSP3"),2), heavy:pick("NumHeavyAtoms"),
+    };
+    out.desc.hbd=pick("NumHBD","lipinskiHBD"); // ensure correct
+    const graph=parseGraph(m.get_molblock());
+    // E3 detection
+    out.e3=null; out.e3atoms=[];
+    for(let i=0;i<state.qmolAnchors.length;i++){ const q=state.qmolAnchors[i]; if(!q) continue;
+      const mt=JSON.parse(m.get_substruct_match(q));
+      if(mt&&mt.atoms&&mt.atoms.length){ out.e3=E3_ANCHORS[i]; out.e3atoms=mt.atoms; break; } }
+    // warhead detection (user scaffold)
+    out.waratoms=[];
+    if(state.warheadQmol){ const mt=JSON.parse(m.get_substruct_match(state.warheadQmol));
+      if(mt&&mt.atoms&&mt.atoms.length) out.waratoms=mt.atoms; }
+    // linker = acyclic interior atoms on shortest path between E3 anchor and warhead
+    out.lnkatoms=[]; out.desc.linker_len=null; out.desc.linker_peg_o=null;
+    if(out.e3atoms.length&&out.waratoms.length){
+      const path=shortestPath(graph.adj,out.e3atoms,out.waratoms);
+      if(path){ const interior=path.slice(1,-1).filter(a=>!graph.ring[a]);
+        out.lnkatoms=interior; out.desc.linker_len=interior.length;
+        out.desc.linker_peg_o=interior.filter(a=>graph.el[a]==="O").length; }
+    }
+    // region atom map (warhead wins, then E3, then linker, so a shared atom reads as a terminus)
+    const reg={}; out.lnkatoms.forEach(a=>reg[a]="lnk"); out.e3atoms.forEach(a=>reg[a]="e3"); out.waratoms.forEach(a=>reg[a]="war");
+    out.regionMap=reg;
+    out.isGlue = (out.e3 && out.waratoms.length===0 && (out.desc.mw||0) < 650 && (out.lnkatoms.length===0));
+    out.na=graph.na;
+  }catch(e){ out.valid=false; out.error="Analysis failed: "+e.message; }
+  m.delete();
+  return out;
+}
+function round(v,n){ if(v==null||isNaN(v)) return null; const f=Math.pow(10,n); return Math.round(v*f)/f; }
+
+/* ============================ depiction ============================ */
+function depict(c,{w=250,h=180,regions=true,extraSmarts=""}={}){
+  return withMol(c.smiles,m=>{
+    const det={ width:w, height:h, bondLineWidth:1, backgroundColour:[1,1,1,0] };
+    const atoms=[], aCol={}, bonds=[], bCol={};
+    if(regions && c.regionMap){
+      for(const [a,r] of Object.entries(c.regionMap)){ const idx=+a; atoms.push(idx); aCol[idx]=REGION[r].rgb; }
+      // colour a bond if both ends share a region
+      try{ const g=parseGraph(m.get_molblock());
+        g.bonds.forEach(([x,y],bi)=>{ const rx=c.regionMap[x],ry=c.regionMap[y];
+          if(rx&&rx===ry){ bonds.push(bi); bCol[bi]=REGION[rx].rgb; } }); }catch(e){}
+    }
+    if(extraSmarts){ const q=state.rdkit.get_qmol(extraSmarts);
+      if(q&&q.is_valid()){ try{ const mt=JSON.parse(m.get_substruct_match(q));
+        (mt.atoms||[]).forEach(a=>{ atoms.push(a); aCol[a]=[0.95,0.85,0.2]; });
+        (mt.bonds||[]).forEach(b=>{ bonds.push(b); bCol[b]=[0.95,0.85,0.2]; }); }catch(e){} }
+      if(q) q.delete(); }
+    det.atoms=atoms; det.bonds=bonds; det.highlightAtomColors=aCol; det.highlightBondColors=bCol;
+    let svg=m.get_svg_with_highlights(JSON.stringify(det));
+    const ink=structInkHex();
+    svg=svg.replace(/#000000/gi,ink).replace(/#FFFFFF/gi,"transparent");
+    return svg;
+  }) || `<div class="empty">no structure</div>`;
+}
+
+/* ============================ rendering ============================ */
+function ligaseClass(c){ return c.e3? c.e3.ligase.toLowerCase() : (c.isGlue?"none":"none"); }
+function e3Label(c){ return c.e3? c.e3.ligase : (c.valid?"—":"invalid"); }
+function potencyColor(v){ // sequential blue ramp on log DC50 (lower = more potent = darker)
+  if(v==null) return "transparent";
+  const lo=Math.log10(1), hi=Math.log10(1000);
+  let t=(Math.log10(Math.max(1,v))-lo)/(hi-lo); t=Math.min(1,Math.max(0,t));
+  const light=getTheme()==="dark";
+  // potent (t=0) strong accent -> weak (t=1) faint
+  const a=(1-t)*0.8+0.08;
+  return `color-mix(in srgb, var(--s1) ${Math.round(a*100)}%, transparent)`;
+}
+function fmtNum(v,dp=0){ return v==null?"–":(+v).toLocaleString(undefined,{maximumFractionDigits:dp}); }
+
+function visibleCompounds(){
+  const q=state.query.trim(); let qmol=null, qIsSmarts=false;
+  if(q){ const tryq=state.rdkit.get_qmol(q); if(tryq&&tryq.is_valid()&&tryq.get_num_atoms&&tryq.get_num_atoms()>0){ qmol=tryq; qIsSmarts=true; } else if(tryq){ tryq.delete(); } }
+  const out=state.compounds.filter(c=>{
+    if(c.dataOnly) return false; // gallery is structure-focused; data-only records live in the Table
+    if(state.filterE3.size){ const key=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE"); if(!state.filterE3.has(key)) return false; }
+    if(!q) return true;
+    if(qIsSmarts && c.valid){ const hit=withMol(c.smiles,m=>{ const mt=JSON.parse(m.get_substruct_match(qmol)); return mt.atoms&&mt.atoms.length; }); if(hit) return true; }
+    const hay=(c.id+" "+c.name+" "+c.series+" "+(c.e3?c.e3.ligase:"")).toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
+  if(qmol) qmol.delete();
+  return out;
+}
+
+function renderGallery(){
+  const g=$("#gallery"); const list=visibleCompounds();
+  if(!list.length){ g.innerHTML=`<div class="empty" style="grid-column:1/-1">No compounds match. Adjust the filter, or load data in the <b>Data</b> tab.</div>`; return; }
+  g.innerHTML="";
+  for(const c of list){
+    const card=document.createElement("div");
+    card.className="card"+(c.valid?"":" bad");
+    card.setAttribute("aria-selected", c.id===state.selectedId);
+    card.tabIndex=0;
+    const dc=c.data&&c.data.dc50_nm!=null? `DC₅₀ ${fmtNum(c.data.dc50_nm)} nM` : (c.isGlue?"glue":"");
+    card.innerHTML=`<div class="depict">${c.valid?depict(c,{w:150,h:112}):'<div class="empty">invalid</div>'}</div>
+      <div class="cid" title="${esc(c.name)}">${esc(c.id)}</div>
+      <div class="crow"><span class="badge ${ligaseClass(c)}">${esc(e3Label(c))}</span><span class="potency">${esc(dc)}</span></div>`;
+    card.onclick=()=>{ select(c.id); };
+    card.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); select(c.id);} };
+    g.appendChild(card);
+  }
+}
+
+function renderChips(){
+  const wrap=$("#e3chips"); const present=new Map();
+  state.compounds.forEach(c=>{ const k=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE"); present.set(k,(present.get(k)||0)+1); });
+  wrap.innerHTML="";
+  [...present.keys()].sort().forEach(k=>{
+    const b=document.createElement("button"); b.className="chip";
+    b.setAttribute("aria-pressed", state.filterE3.has(k));
+    b.textContent=`${k==="GLUE"?"Glue":k==="NONE"?"No anchor":k} (${present.get(k)})`;
+    b.onclick=()=>{ state.filterE3.has(k)?state.filterE3.delete(k):state.filterE3.add(k); renderChips(); renderGallery(); };
+    wrap.appendChild(b);
+  });
+}
+
+/* ---- compound detail ---- */
+function renderDetail(){
+  const pane=$("#pane-compound"); const c=state.compounds.find(x=>x.id===state.selectedId);
+  if(!c){ pane.innerHTML=`<div class="empty">Select a compound from the gallery.</div>`; return; }
+  if(c.dataOnly){ const bio=c.data||{};
+    const cells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
+      return `<div class="prop"><div class="pl">${esc(meta[0])}</div><div class="pv" style="color:var(--accent)">${fmtNum(bio[k],meta[1]==="%"?0:1)} <small>${esc(meta[1])}</small></div></div>`; }).join("")||'<p class="help">No values.</p>';
+    pane.innerHTML=`<h2>${esc(c.id)}</h2><p class="sub">${esc(c.series||"")} · data-only record</p>
+      <div class="status ok" style="margin-bottom:12px">No structure attached. Add a SMILES (CSV/SDF) or an entry with the same identifier to attach these values to a molecule — then it joins the gallery and SAR views.</div>
+      <section class="block"><h3>Reported data</h3><div class="bio">${cells}</div></section>`; return; }
+  if(!c.valid){ pane.innerHTML=`<h2>${esc(c.id)}</h2><div class="status err">${esc(c.error||"invalid structure")}</div><p class="help" style="margin-top:10px">SMILES: <code>${esc(c.smiles)}</code></p>`; return; }
+  const D=c.desc;
+  const bRo5=[]; if(D.mw>500)bRo5.push("MW"); if(D.clogp>5)bRo5.push("cLogP"); if(D.hbd>5)bRo5.push("HBD"); if(D.hba>10)bRo5.push("HBA"); if(D.rot>10)bRo5.push("rot. bonds"); if(D.tpsa>140)bRo5.push("TPSA");
+  const prop=(label,val,unit,flag)=>`<div class="prop${flag?' flag':''}"><div class="pl">${label}</div><div class="pv">${val==null?'–':val}${unit?` <small>${unit}</small>`:''}</div></div>`;
+  const region=(r,extra)=>{ const on=(r==='war'?c.waratoms:r==='e3'?c.e3atoms:c.lnkatoms).length>0;
+    return `<div class="region"><span class="swatch" style="background:var(--reg-${r})"></span><div><div class="rname">${REGION[r].label}</div><div class="rmeta">${on?extra:'not identified'}</div></div></div>`; };
+  const bio=c.data||{};
+  const bioCells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
+    return prop(meta[0],fmtNum(bio[k], meta[1]==="%"?0:1),meta[1],false); }).join("")||'<p class="help">No biological data on this compound.</p>';
+
+  pane.innerHTML=`
+    <h2>${esc(c.id)} <span style="font-weight:400;color:var(--muted);font-size:13px">${esc(c.name)}</span></h2>
+    <p class="sub">${esc(c.series||"")} ${c.isGlue?'· monovalent molecular glue':''}</p>
+    <div class="hl-ctrl">
+      <button class="btn small" id="toggleRegions" aria-pressed="true">Highlight regions</button>
+      <input id="hlIn" placeholder="highlight SMARTS… e.g. c1ccncc1" spellcheck="false" value="${esc(state.hlSmarts)}">
+    </div>
+    <div class="detailtop">
+      <div class="bigdepict" id="bigDepict"></div>
+      <div>
+        <section class="block"><h3>Degrader decomposition</h3>
+          <div class="decomp">
+            ${region('war', c.waratoms.length?`${c.waratoms.length} atoms · ${state.warheadSmarts?'matched scaffold':''}`:'')}
+            ${region('lnk', c.lnkatoms.length?`${c.desc.linker_len} atoms in chain · ${c.desc.linker_peg_o||0} ether O (≈ ${Math.max(0,Math.round((c.desc.linker_peg_o||0)))} PEG-like)`:'set a warhead scaffold to resolve')}
+            ${region('e3', c.e3?`${c.e3.ligase} — ${c.e3.name}`:'no known E3 anchor detected')}
+          </div>
+          ${c.e3?`<p class="help" style="margin-top:7px">${esc(c.e3.note)}</p>`:''}
+        </section>
+      </div>
+    </div>
+    <section class="block"><h3>Calculated properties ${bRo5.length?`<span style="color:var(--warn);text-transform:none;letter-spacing:0;font-weight:500">· beyond Ro5: ${bRo5.join(", ")}</span>`:''}</h3>
+      <div class="props">
+        ${prop("MW",D.mw,"Da",D.mw>500)}${prop("cLogP",D.clogp,"",D.clogp>5)}${prop("TPSA",D.tpsa,"Å²",D.tpsa>140)}
+        ${prop("HBD",D.hbd,"",D.hbd>5)}${prop("HBA",D.hba,"",D.hba>10)}${prop("Rot. bonds",D.rot,"",D.rot>10)}
+        ${prop("Rings",D.rings,"")}${prop("Fsp³",D.fsp3,"")}${prop("Heavy",D.heavy,"")}
+        ${c.desc.linker_len!=null?prop("Linker",c.desc.linker_len,"atoms"):""}
+      </div>
+    </section>
+    <section class="block"><h3>Biological data</h3><div class="bio">${bioCells}</div></section>
+    <section class="block"><h3>Canonical SMILES</h3><p class="help" style="word-break:break-all"><code>${esc(c.smiles)}</code></p></section>
+  `;
+  let showRegions=true;
+  const draw=()=>{ $("#bigDepict").innerHTML=depict(c,{w:420,h:300,regions:showRegions,extraSmarts:state.hlSmarts}); };
+  draw();
+  $("#toggleRegions").onclick=e=>{ showRegions=!showRegions; e.currentTarget.setAttribute("aria-pressed",showRegions); draw(); };
+  const hl=$("#hlIn"); hl.oninput=()=>{ state.hlSmarts=hl.value.trim(); draw(); renderGallery(); };
+}
+
+/* ---- SAR chart ---- */
+function numericFields(){
+  const fields=[...DESCRIPTOR_FIELDS.map(f=>({key:f[0],label:f[1],unit:f[2],from:"desc"}))];
+  const seen=new Set();
+  state.compounds.forEach(c=>{ const d=c.data||{}; Object.keys(d).forEach(k=>{ if(d[k]!=null && typeof d[k]==="number" && !seen.has(k)){ seen.add(k);
+    const meta=ASSAY_LABELS[k]; fields.push({key:k,label:meta?meta[0]:k,unit:meta?meta[1]:"",from:"data",log:meta?meta[2]:false}); } }); });
+  return fields;
+}
+function fieldVal(c,key){ if(!c.valid) return null;
+  if(c.desc&&c.desc[key]!=null) return c.desc[key];
+  if(c.data&&c.data[key]!=null) return c.data[key]; return null; }
+function fieldMeta(key){ return numericFields().find(f=>f.key===key); }
+function seriesColorVar(c){ // colour by E3 ligase or series
+  if(state.chart.color==="ligase"){ const k=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE");
+    return {CRBN:"--s1",VHL:"--s2",MDM2:"--s3",DCAF15:"--s4",GLUE:"--muted",NONE:"--muted"}[k]||"--muted"; }
+  const idx=[...new Set(state.compounds.map(x=>x.series))].indexOf(c.series);
+  return ["--s1","--s2","--s3","--s4","--s5"][idx%5];
+}
+function seriesKey(c){ return state.chart.color==="ligase" ? (c.e3?c.e3.ligase:(c.isGlue?"Glue":"No anchor")) : (c.series||"—"); }
+
+function renderChartControls(){
+  const flds=numericFields();
+  const opt=(sel)=>flds.map(f=>`<option value="${f.key}" ${f.key===sel?"selected":""}>${esc(f.label)}${f.unit?` (${f.unit})`:""}</option>`).join("");
+  $("#chartCtrls").innerHTML=`
+    <div class="field"><label>X axis</label><select id="xSel">${opt(state.chart.x)}</select></div>
+    <div class="field"><label>Y axis</label><select id="ySel">${opt(state.chart.y)}</select></div>
+    <div class="field"><label>Colour by</label><select id="cSel"><option value="ligase" ${state.chart.color==="ligase"?"selected":""}>E3 ligase</option><option value="series" ${state.chart.color==="series"?"selected":""}>Series</option></select></div>
+    <div class="field"><label>Y scale</label><button class="btn small" id="logBtn" aria-pressed="${state.chart.log}">log₁₀</button></div>`;
+  $("#xSel").onchange=e=>{state.chart.x=e.target.value;renderChart();};
+  $("#ySel").onchange=e=>{state.chart.y=e.target.value;renderChart();};
+  $("#cSel").onchange=e=>{state.chart.color=e.target.value;renderChart();};
+  $("#logBtn").onclick=e=>{state.chart.log=!state.chart.log;e.currentTarget.setAttribute("aria-pressed",state.chart.log);renderChart();};
+}
+function renderChart(){
+  const svg=$("#chart"); const W=640,H=380, m={l:64,r:18,t:16,b:52};
+  const xm=fieldMeta(state.chart.x), ym=fieldMeta(state.chart.y);
+  const pts=state.compounds.map(c=>({c,x:fieldVal(c,state.chart.x),y:fieldVal(c,state.chart.y)})).filter(p=>p.x!=null&&p.y!=null&&!isNaN(p.x)&&!isNaN(p.y));
+  const canLog = state.chart.log && pts.every(p=>p.y>0);
+  const yAcc = canLog? (v=>Math.log10(v)) : (v=>v);
+  if(!pts.length){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--muted)" font-size="14">No compounds have both ${esc(xm?xm.label:state.chart.x)} and ${esc(ym?ym.label:state.chart.y)}.</text>`; $("#chartLegend").innerHTML=""; $("#chartNote").textContent=""; return; }
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>yAcc(p.y));
+  let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  if(xmin===xmax){xmin-=1;xmax+=1;} if(ymin===ymax){ymin-=1;ymax+=1;}
+  const padx=(xmax-xmin)*0.08, pady=(ymax-ymin)*0.1; xmin-=padx;xmax+=padx;ymin-=pady;ymax+=pady;
+  const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const Y=v=>H-m.b-(yAcc(v)-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  const Yraw=v=>H-m.b-(v-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  let g=`<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="none"/>`;
+  // gridlines + ticks
+  const yticks=niceTicks(ymin,ymax,5), xticks=niceTicks(xmin,xmax,6);
+  yticks.forEach(t=>{ const y=Yraw(t); g+=`<line x1="${m.l}" y1="${y}" x2="${W-m.r}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    const lbl=canLog? sci(Math.pow(10,t)) : trim(t);
+    g+=`<text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${lbl}</text>`; });
+  xticks.forEach(t=>{ const x=X(t); g+=`<line x1="${x}" y1="${m.t}" x2="${x}" y2="${H-m.b}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
+    g+=`<text x="${x}" y="${H-m.b+18}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${trim(t)}</text>`; });
+  // axis labels
+  g+=`<text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(xm?xm.label:state.chart.x)}${xm&&xm.unit?` (${xm.unit})`:""}</text>`;
+  g+=`<text transform="translate(16 ${m.t+(H-m.t-m.b)/2}) rotate(-90)" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(ym?ym.label:state.chart.y)}${ym&&ym.unit?` (${ym.unit})`:""}${canLog?" · log₁₀":""}</text>`;
+  // connect points within same series when X is monotonic-ish (helps linker trend lines)
+  const bySeries={}; pts.forEach(p=>{ (bySeries[seriesKey(p.c)] ||= []).push(p); });
+  Object.entries(bySeries).forEach(([k,arr])=>{ if(arr.length<2) return; const col=seriesColorVar(arr[0].c);
+    const sorted=[...arr].sort((a,b)=>a.x-b.x);
+    const dstr=sorted.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`).join(" ");
+    g+=`<path d="${dstr}" fill="none" stroke="var(${col})" stroke-width="1.6" opacity="0.4" stroke-dasharray="4 3"/>`; });
+  // points
+  pts.forEach((p,i)=>{ const col=seriesColorVar(p.c); const cx=X(p.x),cy=Y(p.y);
+    g+=`<circle data-i="${i}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="var(${col})" stroke="var(--stage)" stroke-width="1.6"/>`;
+    if(pts.length<=16) g+=`<text x="${cx}" y="${cy-9}" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="var(--f-mono)">${esc(p.c.id)}</text>`; });
+  svg.innerHTML=g;
+  // legend
+  const groups=[...new Set(pts.map(p=>seriesKey(p.c)))];
+  $("#chartLegend").innerHTML=groups.map(k=>{ const ex=pts.find(p=>seriesKey(p.c)===k); return `<span><i style="background:var(${seriesColorVar(ex.c)})"></i>${esc(k)}</span>`; }).join("");
+  // correlation note
+  const r=pearson(pts.map(p=>p.x),pts.map(p=>yAcc(p.y)));
+  $("#chartNote").innerHTML = pts.length>2 ? `Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog?" (log Y)":""}. ${trendText(state.chart.x,state.chart.y,r,pts)}` : `${pts.length} compound(s) plotted.`;
+  // hover
+  const tip=$("#tip"); const wrap=$("#chartWrap");
+  svg.querySelectorAll("circle[data-i]").forEach(el=>{
+    el.style.cursor="pointer";
+    el.onmouseenter=()=>{ const p=pts[+el.dataset.i]; const bb=wrap.getBoundingClientRect(); const sb=svg.getBoundingClientRect();
+      const sx=sb.width/W, sy=sb.height/H; const px=(+el.getAttribute("cx"))*sx+(sb.left-bb.left), py=(+el.getAttribute("cy"))*sy+(sb.top-bb.top);
+      tip.innerHTML=`<b>${esc(p.c.id)}</b><div class="trow">${esc(xm?xm.label:"x")}<span>${fmtNum(p.x,2)}</span></div><div class="trow">${esc(ym?ym.label:"y")}<span>${fmtNum(p.y,2)}</span></div><div class="trow">E3<span>${esc(p.c.e3?p.c.e3.ligase:(p.c.isGlue?"glue":"—"))}</span></div>`;
+      tip.style.opacity=1; tip.style.left=Math.min(bb.width-140,px+12)+"px"; tip.style.top=Math.max(0,py-10)+"px"; el.setAttribute("r","8"); };
+    el.onmouseleave=()=>{ tip.style.opacity=0; el.setAttribute("r","6"); };
+    el.onclick=()=>{ const p=pts[+el.dataset.i]; select(p.c.id); switchTab("compound"); };
+  });
+}
+function trendText(xKey,yKey,r,pts){
+  const potency=["dc50_nm","target_ic50_nm","ec50_nm","ki_nm","kd_nm","ternary_kd_nm"].includes(yKey);
+  if(xKey==="linker_len" && potency && pts && pts.length>=3){
+    const best=pts.reduce((a,b)=>b.y<a.y?b:a);
+    const xm=fieldMeta(yKey);
+    return `Most potent at a linker of <b>${best.x} atoms</b> (${esc(best.c.id)}, ${fmtNum(best.y)}${xm&&xm.unit?" "+xm.unit:""}). Linker-length SAR is usually biphasic — read the optimum, not the slope.`;
+  }
+  if(Math.abs(r)<0.2) return "No strong linear trend.";
+  return r>0?"Positive linear association.":"Negative linear association.";
+}
+
+/* ---- table ---- */
+function tableColumns(){
+  return [ {k:"id",l:"ID",t:"t"},{k:"series",l:"Series",t:"t"},{k:"e3",l:"E3",t:"t"},
+    {k:"mw",l:"MW",t:"n"},{k:"clogp",l:"cLogP",t:"n"},{k:"tpsa",l:"TPSA",t:"n"},
+    {k:"hbd",l:"HBD",t:"n"},{k:"hba",l:"HBA",t:"n"},{k:"rot",l:"Rot",t:"n"},
+    {k:"linker_len",l:"Linker",t:"n"},{k:"dc50_nm",l:"DC₅₀ nM",t:"p"},{k:"dmax_pct",l:"Dmax %",t:"n"},{k:"target_ic50_nm",l:"IC₅₀ nM",t:"n"} ];
+}
+function cellVal(c,k){ if(k==="id")return c.id; if(k==="series")return c.series||""; if(k==="e3")return c.e3?c.e3.ligase:(c.isGlue?"glue":"—");
+  if(c.desc&&c.desc[k]!=null)return c.desc[k]; if(c.data&&c.data[k]!=null)return c.data[k]; return null; }
+function renderTable(){
+  const cols=tableColumns(); const th=$("#dataTable thead"), tb=$("#dataTable tbody");
+  th.innerHTML="<tr>"+cols.map(col=>`<th data-k="${col.k}">${col.l}${state.sort.key===col.k?(state.sort.dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
+  th.querySelectorAll("th").forEach(h=>h.onclick=()=>{ const k=h.dataset.k; if(state.sort.key===k)state.sort.dir*=-1; else {state.sort.key=k;state.sort.dir=1;} renderTable(); });
+  const rows=[...state.compounds].filter(c=>c.valid||c.dataOnly).sort((a,b)=>{ let va=cellVal(a,state.sort.key),vb=cellVal(b,state.sort.key);
+    if(va==null)return 1; if(vb==null)return -1; if(typeof va==="number"&&typeof vb==="number")return (va-vb)*state.sort.dir; return String(va).localeCompare(String(vb))*state.sort.dir; });
+  tb.innerHTML=rows.map(c=>"<tr data-id='"+esc(c.id)+"' aria-selected='"+(c.id===state.selectedId)+"'>"+cols.map(col=>{
+      let v=cellVal(c,col.k);
+      if(col.t==="t") return `<td>${esc(v==null?"":v)}</td>`;
+      if(col.t==="p"){ return `<td class="num"><span class="pcell" style="background:${potencyColor(v)}">${v==null?"–":fmtNum(v)}</span></td>`; }
+      return `<td class="num">${v==null?"–":fmtNum(v, (col.k==="clogp"||col.k==="fsp3"||col.k==="tpsa")?1:0)}</td>`;
+    }).join("")+"</tr>").join("");
+  tb.querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{ select(tr.dataset.id); switchTab("compound"); });
+  $("#tableNote").innerHTML=`${rows.length} rows. DC₅₀ cells shaded by potency (darker = more potent). Click a row to inspect.`;
+}
+function toCSV(){
+  const cols=tableColumns(); const head=["id","name","smiles",...cols.filter(c=>c.k!=="id").map(c=>c.k)];
+  const lines=[head.join(",")];
+  state.compounds.forEach(c=>{ const row=[c.id,q(c.name),q(c.smiles)];
+    cols.filter(col=>col.k!=="id").forEach(col=>{ let v=cellVal(c,col.k); row.push(v==null?"":(typeof v==="string"?q(v):v)); });
+    lines.push(row.join(",")); });
+  return lines.join("\n");
+  function q(s){ s=String(s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+}
+
+/* ============================ ingestion ============================ */
+function addCompounds(rows,{replace=false}={}){
+  if(replace) state.compounds=[];
+  const existing=new Map(state.compounds.map((c,i)=>[c.id,i]));
+  let added=0,bad=0,merged=0,dataOnly=0;
+  for(const r of rows){
+    if(!r.smiles){ // no structure: merge onto a matching compound, else keep as a data-only record
+      if(existing.has(r.id)){ const c=state.compounds[existing.get(r.id)]; c.data={...c.data,...r.data}; merged++; }
+      else { const c={id:r.id,name:r.name||r.id,series:r.series||"data",smiles:"",data:r.data||{},
+        valid:false,dataOnly:true,desc:{},e3:null,e3atoms:[],waratoms:[],lnkatoms:[],regionMap:{}};
+        existing.set(r.id,state.compounds.length); state.compounds.push(c); dataOnly++; }
+      continue; }
+    const c=analyse(r); if(!c.valid) bad++; else added++;
+    if(existing.has(c.id)){ state.compounds[existing.get(c.id)]=c; } else { existing.set(c.id,state.compounds.length); state.compounds.push(c); }
+  }
+  refreshAll();
+  return {added,bad,merged,dataOnly};
+}
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/).filter(l=>l.trim()); if(!lines.length) return [];
+  const delim = lines[0].includes("\t")?"\t":",";
+  const header=splitCSV(lines[0],delim).map(h=>h.trim().toLowerCase());
+  const si=header.findIndex(h=>["smiles","structure","canonical_smiles","smi"].includes(h));
+  const ii=header.findIndex(h=>["id","name","compound","compound_id","cid","example"].includes(h));
+  const rows=[];
+  for(let li=1;li<lines.length;li++){ const cells=splitCSV(lines[li],delim); if(!cells.length) continue;
+    const id = ii>=0? cells[ii] : ("CMPD-"+li);
+    const smiles = si>=0? (cells[si]||"").trim() : "";
+    const data={};
+    header.forEach((h,ci)=>{ if(ci===si||ci===ii) return; const raw=(cells[ci]||"").trim(); if(raw==="") return;
+      const num=parseFloat(raw.replace(/[,%]/g,"")); const key=normAssay(h); if(!isNaN(num)) data[key]=num; });
+    rows.push({id:id||("CMPD-"+li),name:(ii>=0?cells[ii]:id)||("CMPD-"+li),series:"imported",smiles,data});
+  }
+  return rows;
+}
+function normAssay(h){ h=h.replace(/[\s()]+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"");
+  const map={dc50:"dc50_nm","dc50_nm":"dc50_nm",dc_50:"dc50_nm",dmax:"dmax_pct","dmax_":"dmax_pct",dmax_pct:"dmax_pct","dmax_percent":"dmax_pct",
+    ic50:"target_ic50_nm",ic50_nm:"target_ic50_nm",target_ic50:"target_ic50_nm",ec50:"ec50_nm",ec50_nm:"ec50_nm",ki:"ki_nm",kd:"kd_nm",ternary_kd:"ternary_kd_nm"};
+  return map[h]||h;
+}
+function splitCSV(line,delim){ const out=[]; let cur="",inq=false;
+  for(let i=0;i<line.length;i++){ const ch=line[i];
+    if(inq){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else inq=false; } else cur+=ch; }
+    else { if(ch==='"')inq=true; else if(ch===delim){out.push(cur);cur="";} else cur+=ch; } }
+  out.push(cur); return out; }
+function parseSmilesList(text){
+  return text.trim().split(/\r?\n/).filter(l=>l.trim()).map((l,i)=>{ const parts=l.trim().split(/\s+/);
+    return {id:parts[1]||("SMI-"+(i+1)),name:parts.slice(1).join(" ")||("SMI-"+(i+1)),series:"imported",smiles:parts[0],data:{}}; }); }
+function parseSDF(text){
+  const recs=text.split(/\$\$\$\$/).map(r=>r.trim()).filter(r=>r); const rows=[];
+  recs.forEach((rec,ri)=>{ const lines=rec.split(/\r?\n/); const name=(lines[0]||("MOL-"+(ri+1))).trim()||("MOL-"+(ri+1));
+    const mend=rec.indexOf("M  END"); const molblock=mend>=0?rec.slice(0,mend+6):null; if(!molblock)return;
+    let smiles=""; const m=state.rdkit.get_mol(molblock); if(m){ if(m.is_valid())smiles=m.get_smiles(); m.delete(); }
+    const data={}; const re=/>\s+<([^>]+)>\s*\r?\n([^\n]+)/g; let mm;
+    while((mm=re.exec(rec))){ const num=parseFloat(mm[2].replace(/[,%]/g,"")); if(!isNaN(num))data[normAssay(mm[1].trim().toLowerCase())]=num; }
+    rows.push({id:name,name,series:"imported",smiles,data}); });
+  return rows;
+}
+function parsePatentText(text){
+  // pull "Example N" or "Compound N" identifiers with nearby DC50 / IC50 / Dmax values
+  const rows=[]; const re=/(?:example|compound|cpd)\s*[:#]?\s*([0-9]+[a-z]?)/gi; let m; const found={};
+  const segments=text.split(/(?=(?:example|compound|cpd)\s*[:#]?\s*[0-9])/i);
+  segments.forEach(seg=>{ const idm=seg.match(/(?:example|compound|cpd)\s*[:#]?\s*([0-9]+[a-z]?)/i); if(!idm)return;
+    const id="Example "+idm[1]; const data={};
+    const dc=seg.match(/dc\s*50[^0-9]{0,8}([0-9.]+)\s*(nm|µm|um|pm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
+    const ic=seg.match(/ic\s*50[^0-9]{0,8}([0-9.]+)\s*(nm|µm|um|pm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
+    const dmax=seg.match(/d\s*max[^0-9]{0,8}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
+    const smi=seg.match(/SMILES[:\s]+([^\s]+)/i);
+    if(Object.keys(data).length||smi) rows.push({id,name:id,series:"patent",smiles:smi?smi[1]:"",data}); });
+  return rows;
+  function conv(v,u){ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="pm")return v/1000; return v; }
+}
+
+/* ============================ wiring ============================ */
+function setWarhead(smarts){
+  state.warheadSmarts=smarts||""; if(state.warheadQmol){state.warheadQmol.delete();state.warheadQmol=null;}
+  if(smarts){ const q=state.rdkit.get_qmol(smarts); if(q&&q.is_valid())state.warheadQmol=q; else if(q)q.delete(); }
+  // re-analyse all (keep raw id/name/series/smiles/data)
+  state.compounds=state.compounds.map(c=>analyse({id:c.id,name:c.name,series:c.series,smiles:c.smiles,data:c.data}));
+  refreshAll();
+}
+function refreshAll(){
+  const valid=state.compounds.filter(c=>c.valid).length;
+  const dataOnly=state.compounds.filter(c=>c.dataOnly).length;
+  const bad=state.compounds.length-valid-dataOnly;
+  $("#nValid").textContent=valid;
+  $("#nBad").innerHTML=(bad?`· <span style="color:var(--bad)">${bad} invalid</span>`:"")+(dataOnly?` · <span style="color:var(--muted)">${dataOnly} data-only</span>`:"");
+  if(!state.selectedId||!state.compounds.find(c=>c.id===state.selectedId)){ const f=state.compounds.find(c=>c.valid); state.selectedId=f?f.id:null; }
+  renderChips(); renderGallery(); renderDetail(); renderChartControls(); renderChart(); renderTable();
+}
+function select(id){ state.selectedId=id; renderGallery(); renderDetail(); renderTable(); }
+function switchTab(t){ state.tab=t; store.set("dl.tab",t);
+  $$(".tab").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===t));
+  ["compound","sar","table","data"].forEach(p=>$("#pane-"+p).hidden=(p!==t));
+  if(t==="sar") renderChart(); if(t==="table") renderTable();
+}
+function getTheme(){ const a=document.documentElement.getAttribute("data-theme"); if(a)return a;
+  return matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }
+function applyTheme(t){ if(t)document.documentElement.setAttribute("data-theme",t); store.set("dl.theme",t);
+  renderGallery(); renderDetail(); renderChart(); }
+
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function trim(v){ const n=+v; return Math.abs(n)>=1000? n.toExponential(1) : (Math.round(n*100)/100).toString(); }
+function sci(v){ if(v>=1000||v<0.01)return (+v).toExponential(0); return (Math.round(v*100)/100).toString(); }
+function niceTicks(lo,hi,n){ const span=hi-lo, step0=span/n, mag=Math.pow(10,Math.floor(Math.log10(step0))); const norm=step0/mag;
+  const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag; const start=Math.ceil(lo/step)*step; const out=[];
+  for(let v=start;v<=hi+1e-9;v+=step)out.push(+v.toFixed(10)); return out; }
+function pearson(a,b){ const n=a.length,ma=a.reduce((x,y)=>x+y,0)/n,mb=b.reduce((x,y)=>x+y,0)/n; let num=0,da=0,db=0;
+  for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;num+=x*y;da+=x*x;db+=y*y;} return (da&&db)?num/Math.sqrt(da*db):0; }
+
+async function copyText(text,btn){ const old=btn.textContent;
+  try{ await navigator.clipboard.writeText(text); btn.textContent="Copied ✓"; }
+  catch(e){ const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");btn.textContent="Copied ✓";}catch(_){btn.textContent="Copy failed";}ta.remove(); }
+  setTimeout(()=>btn.textContent=old,1400); }
+
+function setStatus(msg,ok=true){ $("#dataStatus").innerHTML=`<div class="status ${ok?"ok":"err"}">${esc(msg)}</div>`; }
+
+function bindUI(){
+  $("#btnTheme").onclick=()=>{ applyTheme(getTheme()==="dark"?"light":"dark"); };
+  $$(".tab").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+  const q=$("#q"); q.oninput=()=>{ state.query=q.value; renderGallery(); }; $("#qClear").onclick=()=>{ q.value="";state.query="";renderGallery(); };
+  $("#warheadIn").value=state.warheadSmarts;
+  $("#applyWarhead").onclick=()=>{ const v=$("#warheadIn").value.trim(); const test=state.rdkit.get_qmol(v); const ok=test&&test.is_valid(); if(test)test.delete();
+    if(!v||!ok){ setStatus("Invalid SMARTS pattern.",false); return; } setWarhead(v); setStatus("Warhead scaffold applied — degraders re-decomposed into warhead · linker · E3 ligand."); };
+  $("#clearWarhead").onclick=()=>{ setWarhead(""); $("#warheadIn").value=""; setStatus("Warhead scaffold cleared. E3 ligand is still detected automatically; linker shown only where resolvable."); };
+  $("#parseBtn").onclick=()=>doParse(false);
+  $("#replaceBtn").onclick=()=>doParse(true);
+  $("#loadSample").onclick=()=>{ setWarhead(DEFAULT_WARHEAD); $("#warheadIn").value=DEFAULT_WARHEAD; const r=addCompounds(sampleRows(),{replace:true}); setStatus(`Loaded ${r.added} sample compounds.`); };
+  $("#patentBtn").onclick=()=>{ const rows=parsePatentText($("#patentArea").value); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
+    const r=addCompounds(rows); setStatus(`Patent text: extracted ${rows.length} record(s) — ${r.added} with structure, merged onto ${r.merged}, ${r.dataOnly} kept as data-only (see Table). Attach a structure by matching the identifier.`); };
+  $("#fileIn").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+    rd.onload=()=>{ const t=rd.result; const name=f.name.toLowerCase();
+      let rows; if(name.endsWith(".sdf")||name.endsWith(".mol"))rows=parseSDF(t);
+      else if(name.endsWith(".smi"))rows=parseSmilesList(t); else rows=parseCSV(t);
+      const r=addCompounds(rows); setStatus(`${f.name}: added ${r.added}, merged ${r.merged}, ${r.bad} invalid.`,r.bad===0); };
+    rd.readAsText(f); e.target.value=""; };
+  $("#copyCsv").onclick=e=>copyText(toCSV(),e.currentTarget);
+  $("#copySmi").onclick=e=>copyText(state.compounds.filter(c=>c.valid).map(c=>c.smiles+" "+c.id).join("\n"),e.currentTarget);
+}
+function doParse(replace){
+  const fmt=$("#fmt").value, text=$("#pasteArea").value; if(!text.trim()){setStatus("Nothing to parse — paste data first.",false);return;}
+  let rows; try{ rows = fmt==="csv"?parseCSV(text):fmt==="smiles"?parseSmilesList(text):parseSDF(text); }
+  catch(e){ setStatus("Parse error: "+e.message,false); return; }
+  if(!rows.length){setStatus("No rows found. Check the format selection.",false);return;}
+  const r=addCompounds(rows,{replace}); setStatus(`${replace?"Replaced with":"Added"} ${r.added} compound(s)${r.bad?`, ${r.bad} invalid`:""}${r.merged?`, merged data onto ${r.merged}`:""}${r.dataOnly?`, ${r.dataOnly} data-only`:""}.`,r.bad===0);
+}
+
+/* ============================ boot ============================ */
+function boot(){
+  state.qmolAnchors=E3_ANCHORS.map(a=>{ const q=state.rdkit.get_qmol(a.smarts); return (q&&q.is_valid())?q:null; });
+  setWarhead(DEFAULT_WARHEAD);
+  addCompounds(sampleRows(),{replace:true});
+  bindUI();
+  const th=store.get("dl.theme"); if(th)document.documentElement.setAttribute("data-theme",th);
+  const tab=store.get("dl.tab"); switchTab(tab&&["compound","sar","table","data"].includes(tab)?tab:"compound");
+  $("#boot").hidden=true; $("#app").hidden=false;
+}
+window.addEventListener("DOMContentLoaded",()=>{
+  if(typeof initRDKitModule!=="function"){ $("#bootmsg").textContent="Could not load the chemistry engine (offline?). Reconnect and reload."; return; }
+  initRDKitModule({ locateFile:()=>"./RDKit_minimal.wasm" })
+    .then(rk=>{ state.rdkit=rk; try{ boot(); }catch(e){ $("#bootmsg").textContent="Startup error: "+e.message; console.error(e); } })
+    .catch(e=>{ $("#bootmsg").textContent="Chemistry engine failed to initialise: "+e.message; console.error(e); });
+});
+</script>
