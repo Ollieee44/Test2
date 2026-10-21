@@ -1,0 +1,13 @@
+# Core service + text extraction (always needed)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pypdf>=4.0
+rdkit>=2024.3
+
+# OCSR for drawn-only structures (optional; large model downloads on first run).
+# Also requires the system "poppler" package for pdf2image.
+#   decimer>=2.3
+#   decimer-segmentation>=1.0
+#   pdf2image>=1.17
+#   pillow>=10.0

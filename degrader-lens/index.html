@@ -301,7 +301,12 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             </div>
             <textarea id="patentArea" spellcheck="false" placeholder="…or paste an excerpt: Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
           </div>
-          <p class="help" style="margin-top:4px"><b>Drawn structures that appear only as images</b> are not auto-recognised in the browser: converting a picture to SMILES needs optical chemical-structure recognition (<code>DECIMER</code> / <code>MolScribe</code>). Run the bundled <code>tools/patent_to_csv.py</code> companion for full image→structure extraction, then load its CSV here. Chemical names resolve to SMILES via <code>OPSIN</code> or PubChem in a normal browser tab.</p>
+          <p class="help" style="margin-top:4px"><b>Drawn structures that appear only as images</b> are not auto-recognised in the browser: converting a picture to SMILES needs optical chemical-structure recognition (<code>DECIMER</code> / <code>MolScribe</code>). Two routes: run the bundled <code>tools/patent_to_csv.py</code> companion and load its CSV here, or point the uploader at a self-hosted OCSR backend (<code>server/app.py</code>) below.</p>
+          <div class="inline" style="margin-top:7px">
+            <input type="text" id="ocsrUrl" placeholder="OCSR server URL (self-hosted, optional), e.g. http://localhost:8000" spellcheck="false">
+            <label style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="ocsrOn"> run OCSR on the server</label>
+          </div>
+          <p class="help" style="margin-top:4px">When a server URL is set, uploads are sent there for full text + OCSR extraction. This needs the page to be <b>self-hosted</b> — the claude.ai artifact sandbox blocks outbound requests, so there it stays text/SMILES only.</p>
         </section>
 
         <div id="dataStatus"></div>
@@ -837,6 +842,29 @@ function extractPatentRecords(text){
     if(Object.keys(data).length||smiles) rows.push({id,name:id,series:"patent",smiles,data}); });
   return rows; }
 async function extractFromPDF(file){
+  const url=($("#ocsrUrl")?$("#ocsrUrl").value.trim():"");
+  if(url) return extractViaServer(file,url,$("#ocsrOn")&&$("#ocsrOn").checked);
+  return extractFromPDFClient(file);
+}
+async function extractViaServer(file,url,ocsr){
+  const prog=$("#pdfProgress"); prog.textContent="Sending "+file.name+" to OCSR server…";
+  try{
+    const fd=new FormData(); fd.append("pdf",file); fd.append("ocsr",ocsr?"1":"0");
+    const res=await fetch(url.replace(/\/+$/,"")+"/extract",{method:"POST",body:fd});
+    if(!res.ok) throw new Error("server returned "+res.status);
+    const j=await res.json(); prog.textContent="";
+    const rows=(j.records||[]).map(r=>({id:r.id,name:r.id,
+      series:(r.source||"").includes("ocsr")?"patent (OCSR)":"patent",
+      smiles:r.smiles||"",data:r.data||{}}));
+    if(!rows.length){ setStatus(`Server read ${j.pages} page(s) of ${esc(j.filename||file.name)} but found no records.`,false); return; }
+    const withS=rows.filter(r=>r.smiles).length, rr=addCompounds(rows);
+    const extra=j.ocsr_used?" OCSR recovered drawn structures." : (ocsr&&j.ocsr_error?` Server OCSR unavailable (${esc(j.ocsr_error)}).`:"");
+    setStatus(`${esc(j.filename||file.name)} via server: ${j.pages} pages → ${rows.length} records (${withS} with SMILES). Added ${rr.added}, merged ${rr.merged}, ${rr.dataOnly} data-only.${extra}`, rr.bad===0);
+  }catch(e){ prog.textContent="";
+    setStatus("OCSR server unreachable ("+e.message+") — using in-browser text extraction instead.",false);
+    return extractFromPDFClient(file); }
+}
+async function extractFromPDFClient(file){
   const prog=$("#pdfProgress");
   if(!window.pdfjsLib){ setStatus("PDF reader did not load — reload the page and try again.",false); return; }
   prog.textContent="Reading "+file.name+"…";
@@ -911,6 +939,9 @@ function bindUI(){
   $("#parseBtn").onclick=()=>doParse(false);
   $("#replaceBtn").onclick=()=>doParse(true);
   $("#loadSample").onclick=()=>{ setWarhead(DEFAULT_WARHEAD); $("#warheadIn").value=DEFAULT_WARHEAD; const r=addCompounds(sampleRows(),{replace:true}); setStatus(`Loaded ${r.added} sample compounds.`); };
+  const ou=$("#ocsrUrl"), oon=$("#ocsrOn");
+  if(ou){ ou.value=store.get("dl.ocsrUrl")||""; ou.onchange=()=>store.set("dl.ocsrUrl",ou.value.trim()); }
+  if(oon){ oon.checked=store.get("dl.ocsrOn")==="1"; oon.onchange=()=>store.set("dl.ocsrOn",oon.checked?"1":"0"); }
   $("#pdfIn").onchange=e=>{ const f=e.target.files[0]; if(f) extractFromPDF(f); e.target.value=""; };
   $("#patentBtn").onclick=()=>{ const rows=extractPatentRecords($("#patentArea").value); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
     const r=addCompounds(rows); setStatus(`Patent text: extracted ${rows.length} record(s) — ${r.added} with structure, merged onto ${r.merged}, ${r.dataOnly} kept as data-only (see Table). Attach a structure by matching the identifier.`); };

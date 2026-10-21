@@ -96,9 +96,16 @@ pip install "decimer>=2.3" pdf2image pillow   # add OCSR for drawn structures
 python tools/patent_to_csv.py patent.pdf -o compounds.csv --ocsr
 ```
 
-It writes a CSV in this tool's format; load it in the **Data** tab. The tool is
-deliberately honest about this boundary rather than guessing structures from
-pictures.
+It writes a CSV in this tool's format; load it in the **Data** tab.
+
+For **one-upload, fully automatic** extraction of image-only patents (including
+OCSR), self-host the page and run the OCSR backend in `server/` — see
+`server/README.md`. Set its URL in the Data tab and uploads are processed
+server-side. This only works when you host the page yourself; the claude.ai
+artifact sandbox blocks outbound calls, so there it stays text/SMILES only.
+
+The tool is deliberately honest about this boundary rather than guessing
+structures from pictures.
 
 ## Other limitations
 - Fully automatic warhead/linker splitting of an arbitrary molecule is a hard
