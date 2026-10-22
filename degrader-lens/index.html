@@ -171,6 +171,19 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .status.err{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
 .help{font-size:12px;color:var(--muted);line-height:1.55}
 .help code{font-family:var(--f-mono);background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+.dropzone{border:1.5px dashed var(--line);border-radius:8px;padding:16px;text-align:center;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--panel-2)}
+.dropzone:hover,.dropzone.drag{border-color:var(--accent);color:var(--ink)}
+.dropzone u{color:var(--accent)}
+.dropzone img{max-height:120px;max-width:100%;border-radius:6px;margin-top:6px}
+.review-src{max-height:170px;max-width:100%;border:1px solid var(--line);border-radius:8px;margin:10px 0}
+.rev{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px}
+.rev .revdep{height:92px;display:flex;align-items:center;justify-content:center;background:var(--stage);border-radius:6px;overflow:hidden}
+.rev .revdep svg{max-width:100%;max-height:100%}
+.rev .revbody{min-width:0}
+.rev input{border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:5px 7px;font:11.5px var(--f-mono);width:100%}
+.rev .revid{margin-bottom:5px}
+.rev .revact{display:flex;flex-direction:column;gap:5px}
+@media (max-width:520px){.rev{grid-template-columns:1fr}}
 
 .boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;flex-direction:column;gap:14px;text-align:center;padding:24px}
 .boot h1{font:700 26px var(--f-display);margin:0;letter-spacing:-.02em}
@@ -309,6 +322,26 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
           <p class="help" style="margin-top:4px">When a server URL is set, uploads are sent there for full text + OCSR extraction. This needs the page to be <b>self-hosted</b> — the claude.ai artifact sandbox blocks outbound requests, so there it stays text/SMILES only.</p>
         </section>
 
+        <section class="block" id="claudeSec">
+          <h3>Read drawn structures with Claude (in-browser)</h3>
+          <p class="help" id="claudeNote">Checking whether Claude vision is available here…</p>
+          <div id="claudeTools" hidden>
+            <p class="help" style="margin-bottom:7px">Snip one or a few structure drawings from the patent (or render a page below) and Claude reads them into SMILES — no install. Each result is validated with RDKit and shown next to the drawing for you to <b>check before adding</b>: vision OCSR is a strong assist, not guaranteed correct on complex degraders.</p>
+            <div class="dropzone" id="claudeDrop" tabindex="0">Drop or paste a structure image, or <u>choose a file</u>.<input type="file" id="claudeImgIn" accept="image/*" hidden></div>
+            <div class="inline" style="margin-top:7px">
+              <button class="btn small primary" id="claudeReadImg" disabled>Read image with Claude</button>
+              <span id="pdfPageWrap" hidden class="inline" style="gap:5px">
+                <span class="help">or render page</span>
+                <input type="number" id="pdfPageNo" min="1" value="1" style="width:60px;border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:4px 6px;font:12px var(--f-mono)">
+                <span class="help" id="pdfPageOf"></span>
+                <button class="btn small" id="claudeReadPage">Read PDF page</button>
+              </span>
+              <span id="claudeStatus" class="help"></span>
+            </div>
+            <div id="claudeReview"></div>
+          </div>
+        </section>
+
         <div id="dataStatus"></div>
       </div>
     </div>
@@ -372,6 +405,7 @@ const state = {
   filterE3:new Set(), query:"",
   sort:{key:"id",dir:1}, hlSmarts:"",
   chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
+  sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
 };
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
@@ -871,6 +905,7 @@ async function extractFromPDFClient(file){
   try{
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
+    state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
     let text="";
     for(let p=1;p<=pdf.numPages;p++){ prog.textContent=`Scanning page ${p} / ${pdf.numPages}…`;
       const page=await pdf.getPage(p); const tc=await page.getTextContent();
@@ -882,6 +917,101 @@ async function extractFromPDFClient(file){
     const r=addCompounds(rows);
     setStatus(`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} records (${withStruct} with a SMILES). Added ${r.added} structures, merged onto ${r.merged}, ${r.dataOnly} data-only. Any drawn-only structures need the OCSR companion.`, r.bad===0);
   }catch(e){ prog.textContent=""; setStatus("PDF error: "+e.message,false); }
+}
+
+/* ============================ Claude vision OCSR (in-browser) ============================ */
+const OCSR_PROMPT = `You are an expert cheminformatician performing optical chemical structure recognition (OCSR) on drawings from a medicinal-chemistry patent. The structures may be heterobifunctional degraders (PROTACs) or molecular glues.
+
+Return ONLY a JSON array, one element per distinct drawn chemical structure:
+[{"id": <string|null>, "smiles": <string>}]
+- "smiles": one valid SMILES for that structure. Include stereochemistry (@, @@, / , \\) where it is drawn. Expand only abbreviations you are sure of (e.g. Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see.
+- "id": the compound label printed beside it if visible (e.g. "Example 12", "Compound 7"), else null.
+If there is no chemical structure, return []. No text outside the JSON array.`;
+
+async function resolveClaude(){
+  try{
+    if(window.claude && typeof window.claude.use==="function"){
+      const s=await window.claude.use("sample");
+      if(s){ state.sample=s;
+        try{ const lim=await s.limits(); state.sampleImages=!!(lim&&lim.images); }catch(e){} }
+    }
+  }catch(e){}
+  updateClaudeUI();
+}
+function updateClaudeUI(){
+  const note=$("#claudeNote"), tools=$("#claudeTools"); if(!note||!tools) return;
+  if(state.sample && state.sampleImages){
+    tools.hidden=false;
+    note.textContent="Claude reads structure drawings into SMILES on your own Claude account — it asks your permission on first use.";
+  } else {
+    tools.hidden=true;
+    note.innerHTML=window.claude ? "Claude vision isn't available for this view (your account or organization hasn't enabled it for artifacts)."
+      : "This runs only in the published claude.ai artifact (where the page can call Claude). On a locally-served copy, use the paste/CSV routes or the OCSR backend instead.";
+  }
+}
+async function renderPdfPage(pdfDoc,n,scale){
+  const page=await pdfDoc.getPage(n);
+  const vp=page.getViewport({scale:scale||2});
+  const canvas=document.createElement("canvas"); canvas.width=Math.min(2200,vp.width); canvas.height=Math.round(canvas.width*vp.height/vp.width);
+  const sc=canvas.width/vp.width; const vp2=page.getViewport({scale:(scale||2)*sc});
+  const ctx=canvas.getContext("2d"); ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext:ctx,viewport:vp2}).promise;
+  return await new Promise(res=>canvas.toBlob(res,"image/png"));
+}
+function showPdfPagePicker(){
+  const wrap=$("#pdfPageWrap"); if(!wrap) return;
+  if(state.pdfDoc){ wrap.hidden=false; $("#pdfPageNo").max=state.pdfDoc.numPages;
+    $("#pdfPageNo").value=1; $("#pdfPageOf").textContent="of "+state.pdfDoc.numPages+" ("+state.pdfName+")"; }
+  else wrap.hidden=true;
+}
+function setClaudeBlob(blob,previewUrl){
+  state.claudeBlob=blob; const dz=$("#claudeDrop");
+  dz.innerHTML = blob ? `Image ready — <u>choose another</u><br><img src="${previewUrl}" alt="selected structure">`
+    : `Drop or paste a structure image, or <u>choose a file</u>.`;
+  dz.appendChild(Object.assign(document.createElement("input"),{type:"file",accept:"image/*",hidden:true,id:"claudeImgIn"}));
+  $("#claudeImgIn").onchange=onClaudeFile;
+  $("#claudeReadImg").disabled=!blob;
+}
+function onClaudeFile(e){ const f=e.target.files&&e.target.files[0]; if(f&&f.type.startsWith("image/")) setClaudeBlob(f,URL.createObjectURL(f)); }
+
+async function readWithClaude(blob,sourceLabel){
+  const st=$("#claudeStatus"), rev=$("#claudeReview");
+  if(!state.sample){ setStatus("Claude vision is not available in this view.",false); return; }
+  st.textContent="Reading with Claude… (up to a minute)"; rev.innerHTML="";
+  try{
+    const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:"complex"});
+    st.textContent="";
+    const items=(Array.isArray(arr)?arr:[]).map(o=>{ const raw=(o&&o.smiles||"").trim();
+      const canon=raw?withMol(raw,m=>m.get_smiles()):null;
+      return {id:(o&&o.id)||"", raw, smiles:canon||raw, valid:!!canon}; });
+    if(!items.length){ st.textContent="Claude did not find a chemical structure in that image."; return; }
+    renderReview(items, URL.createObjectURL(blob), sourceLabel);
+  }catch(e){ st.textContent="";
+    const msg={not_granted:"You declined Claude access (or it isn't enabled). ",rate_limited:"Claude is rate-limited — try again shortly. ",images_unavailable:"This view can't send images to Claude. ",refused:"Claude declined to read that image. ",invalid_json:"Claude's reply wasn't usable — try a cleaner crop. "}[e.code]||("Claude error: "+(e.message||e.code)+". ");
+    setStatus(msg,false); }
+}
+function renderReview(items, srcUrl, sourceLabel){
+  const rev=$("#claudeReview");
+  const head=`<p class="help" style="margin-top:10px">Recognised from <b>${esc(sourceLabel||"image")}</b> — compare each structure to the drawing, fix if needed, then add. <img class="review-src" src="${srcUrl}" alt="source"></p>`;
+  rev.innerHTML=head + items.map((it,i)=>`
+    <div class="rev" data-i="${i}">
+      <div class="revdep">${it.valid?depict({smiles:it.smiles,regionMap:null},{w:120,h:92,regions:false}):'<span class="help">not parsed</span>'}</div>
+      <div class="revbody">
+        <input class="revid" data-f="id" placeholder="compound id (optional)" value="${esc(it.id)}">
+        <input data-f="smi" spellcheck="false" value="${esc(it.smiles)}">
+      </div>
+      <div class="revact"><button class="btn small primary" data-a="add">Add</button><button class="btn small" data-a="skip">Skip</button></div>
+    </div>`).join("");
+  rev.querySelectorAll(".rev").forEach(card=>{
+    const smi=card.querySelector('[data-f="smi"]'), dep=card.querySelector(".revdep");
+    smi.oninput=()=>{ const c=withMol(smi.value.trim(),m=>m.get_smiles()); dep.innerHTML=c?depict({smiles:c,regionMap:null},{w:120,h:92,regions:false}):'<span class="help">invalid</span>'; };
+    card.querySelector('[data-a="skip"]').onclick=()=>card.remove();
+    card.querySelector('[data-a="add"]').onclick=()=>{
+      const id=card.querySelector('[data-f="id"]').value.trim()||("Claude-"+(state.compounds.length+1));
+      const r=addCompounds([{id,name:id,series:"Claude-read (verify)",smiles:smi.value.trim(),data:{}}]);
+      card.querySelector('.revact').innerHTML = r.added? '<span style="color:var(--ok);font-size:12px">Added ✓</span>' : '<span style="color:var(--bad);font-size:12px">Invalid</span>';
+    };
+  });
 }
 
 /* ============================ wiring ============================ */
@@ -943,6 +1073,21 @@ function bindUI(){
   if(ou){ ou.value=store.get("dl.ocsrUrl")||""; ou.onchange=()=>store.set("dl.ocsrUrl",ou.value.trim()); }
   if(oon){ oon.checked=store.get("dl.ocsrOn")==="1"; oon.onchange=()=>store.set("dl.ocsrOn",oon.checked?"1":"0"); }
   $("#pdfIn").onchange=e=>{ const f=e.target.files[0]; if(f) extractFromPDF(f); e.target.value=""; };
+  // Claude vision OCSR controls
+  const dz=$("#claudeDrop");
+  if(dz){
+    dz.onclick=()=>$("#claudeImgIn")&&$("#claudeImgIn").click();
+    $("#claudeImgIn").onchange=onClaudeFile;
+    dz.ondragover=e=>{e.preventDefault();dz.classList.add("drag");};
+    dz.ondragleave=()=>dz.classList.remove("drag");
+    dz.ondrop=e=>{e.preventDefault();dz.classList.remove("drag"); const f=[...(e.dataTransfer.files||[])].find(x=>x.type.startsWith("image/")); if(f) setClaudeBlob(f,URL.createObjectURL(f));};
+    dz.onpaste=e=>{ const it=[...(e.clipboardData.items||[])].find(x=>x.type.startsWith("image/")); if(it){ const f=it.getAsFile(); if(f) setClaudeBlob(f,URL.createObjectURL(f)); } };
+    $("#claudeReadImg").onclick=()=>{ if(state.claudeBlob) readWithClaude(state.claudeBlob,"uploaded image"); };
+    $("#claudeReadPage").onclick=async()=>{ if(!state.pdfDoc)return; const n=Math.max(1,Math.min(state.pdfDoc.numPages,+$("#pdfPageNo").value||1));
+      $("#claudeStatus").textContent="Rendering page "+n+"…";
+      try{ const blob=await renderPdfPage(state.pdfDoc,n); await readWithClaude(blob,"page "+n+" of "+state.pdfName); }
+      catch(e){ $("#claudeStatus").textContent="Could not render that page: "+e.message; } };
+  }
   $("#patentBtn").onclick=()=>{ const rows=extractPatentRecords($("#patentArea").value); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
     const r=addCompounds(rows); setStatus(`Patent text: extracted ${rows.length} record(s) — ${r.added} with structure, merged onto ${r.merged}, ${r.dataOnly} kept as data-only (see Table). Attach a structure by matching the identifier.`); };
   $("#fileIn").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
@@ -972,6 +1117,7 @@ function boot(){
   const th=store.get("dl.theme"); if(th)document.documentElement.setAttribute("data-theme",th);
   const tab=store.get("dl.tab"); switchTab(tab&&["compound","sar","table","data"].includes(tab)?tab:"compound");
   $("#boot").hidden=true; $("#app").hidden=false;
+  resolveClaude();
 }
 window.addEventListener("DOMContentLoaded",()=>{
   if(typeof initRDKitModule!=="function"){ $("#bootmsg").textContent="Could not load the chemistry engine (offline?). Reconnect and reload."; return; }

@@ -84,9 +84,19 @@ Uploading a PDF gets you everything that is in the document as **text**:
 identifiers, assay values, and machine-readable SMILES (common in modern patent
 tables and SI). For those compounds you get structures + SAR straight from the PDF.
 
-A structure that appears **only as a drawing** (an image) cannot be turned into a
-SMILES in the browser — that needs optical chemical-structure recognition, which
-is an ML model. For image-only patents, run the bundled companion:
+A structure that appears **only as a drawing** (an image) needs optical
+chemical-structure recognition. There are three routes, in order of least setup:
+
+**1. Claude vision, in the browser (no install).** In the published claude.ai
+artifact, the **Data** tab has *Read drawn structures with Claude*: snip a
+structure (or render a page of the loaded PDF) and Claude reads it into SMILES on
+your own account. Every result is validated with RDKit and shown next to the
+drawing to **check before adding**. It runs only in the claude.ai artifact (the
+page calls Claude there) and is a strong assist, not guaranteed correct on complex
+degraders — so verify each structure.
+
+**2. The local companion (install, most accurate on batches).** For image-only
+patents processed in bulk, run the bundled companion:
 
 ```
 pip install pypdf rdkit                       # text + data + inline SMILES
@@ -98,11 +108,12 @@ python tools/patent_to_csv.py patent.pdf -o compounds.csv --ocsr
 
 It writes a CSV in this tool's format; load it in the **Data** tab.
 
-For **one-upload, fully automatic** extraction of image-only patents (including
-OCSR), self-host the page and run the OCSR backend in `server/` — see
-`server/README.md`. Set its URL in the Data tab and uploads are processed
-server-side. This only works when you host the page yourself; the claude.ai
-artifact sandbox blocks outbound calls, so there it stays text/SMILES only.
+**3. A self-hosted backend (one upload, fully automatic).** Run the OCSR backend
+in `server/` (see `server/README.md`) and set its URL in the Data tab; uploads are
+then processed server-side, drawings included. This needs you to host the page
+yourself — the claude.ai artifact sandbox blocks outbound calls.
+
+Routes 2 and 3 use DECIMER; route 1 uses Claude's own vision.
 
 The tool is deliberately honest about this boundary rather than guessing
 structures from pictures.
