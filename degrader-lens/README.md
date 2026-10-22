@@ -40,12 +40,16 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 ## Two versions
 
 - **`index.html`** — the original: opens with a loaded sample dataset.
-- **`index-v4.html`** — v3 plus an **interactive structure view**: the depiction is
-  clean (standard element colours; region highlighting is off by default, a toggle),
-  every atom is **clickable** — select atoms to read and copy the **fragment SMILES**
-  — and you can **set the regions yourself** (assign a selection to Warhead / Linker /
-  E3, or pick the two linker ends and it splits the rest), overriding the automatic
-  split when it's wrong.
+- **`index-v4.html`** — v3 plus an **interactive structure view** and a **fast,
+  decoupled PDF flow**. The depiction is clean (standard element colours; region
+  highlighting off by default), every atom is **clickable** — select atoms to read
+  and copy the **fragment SMILES** — and you can **set the regions yourself** (assign
+  a selection to Warhead / Linker / E3, or pick the two linker ends and it splits the
+  rest). On a PDF, the **biology SAR comes out in seconds from the text alone**
+  (compound numbers + assay data + any inline SMILES, all plotted — even for
+  compounds with no structure); reading **drawn** structures with Claude is a
+  separate, optional background step with a **Fast / Balanced / Best** speed control,
+  an ETA and a Stop button, so it never blocks the SAR.
 - **`index-v3.html`** — v2 plus: **automatic scaffold-free decomposition** (warhead/
   linker/E3 split and linker length populate for any PROTAC, no scaffold needed),
   **target (POI) detection** from the document text, **tidy-up** that keeps only

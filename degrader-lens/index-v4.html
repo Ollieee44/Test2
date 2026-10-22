@@ -297,15 +297,20 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <div id="poiBanner" hidden style="margin-bottom:12px"></div>
 
         <section class="block">
-          <p class="help"><b>Upload a patent or paper PDF</b> and the tool reads it for <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / K<sub>i</sub> / D<sub>max</sub></b>, and any machine-readable <b>SMILES</b> in tables or the SI (each validated with RDKit). With <b>“read drawn structures too”</b> ticked, it first finds the pages that hold the <b>numbered compound structures</b> (usually the tables toward the end), skips the rest, has Claude read those drawings, and <b>merges every structure onto its compound by number</b>.</p>
+          <p class="help"><b>Upload a patent or paper PDF.</b> In seconds you get the <b>biology SAR</b> — compound numbers and reported <b>IC<sub>50</sub> / DC<sub>50</sub> / K<sub>i</sub> / D<sub>max</sub></b> — plus any machine-readable <b>SMILES</b> in tables or the SI (validated with RDKit). Reading <b>drawn</b> structures with Claude is a separate, optional step (tick below) that runs in the background and can be slow on a big patent — the SAR is ready without it.</p>
           <div class="inline" style="margin-top:9px">
             <label class="btn primary" style="cursor:pointer">Upload PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
-            <label id="pdfVisionWrap" hidden style="gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision" checked> read drawn structures too (Claude)</label>
+            <span class="help">→ SAR + text SMILES, fast.</span>
+          </div>
+          <div class="inline" id="pdfVisionWrap" hidden style="margin-top:8px;gap:10px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision"> also read drawn structures (Claude — slower)</label>
+            <span class="inline" style="gap:5px"><label for="ocsrTier" class="help">speed</label>
+              <select id="ocsrTier" style="border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:4px 7px;font-size:12px"><option value="quick">Fast</option><option value="default">Balanced</option><option value="complex">Best</option></select></span>
           </div>
           <div class="inline" style="margin-top:7px">
             <label class="help" for="pdfRange" style="white-space:nowrap">Limit to pages (optional)</label>
             <input type="text" id="pdfRange" placeholder="e.g. 80-140 or last 30" spellcheck="false" style="max-width:210px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:5px 8px;font:12px var(--f-mono)">
-            <label id="keepUnnumWrap" style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="keepUnnum"> keep unnumbered structures (intermediates)</label>
+            <label id="keepUnnumWrap" style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="keepUnnum"> keep unnumbered structures</label>
           </div>
           <div class="datarow" style="margin-top:10px">
             <p class="help" style="margin:0">…or paste a text excerpt from a patent:</p>
@@ -436,7 +441,7 @@ const state = {
   sort:{key:"id",dir:1}, hlSmarts:"",
   chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
   sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
-  keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false,
+  keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick",
 };
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
@@ -843,7 +848,7 @@ function numericFields(){
     const meta=ASSAY_LABELS[k]; fields.push({key:k,label:meta?meta[0]:k,unit:meta?meta[1]:"",from:"data",log:meta?meta[2]:false}); } }); });
   return fields;
 }
-function fieldVal(c,key){ if(!c.valid) return null;
+function fieldVal(c,key){ // data (assay) values plot even for data-only rows; descriptors need a structure
   if(c.desc&&c.desc[key]!=null) return c.desc[key];
   if(c.data&&c.data[key]!=null) return c.data[key]; return null; }
 function fieldMeta(key){ return numericFields().find(f=>f.key===key); }
@@ -1109,21 +1114,29 @@ async function extractFromPDFClient(file){
     const tg=detectTargets(text); if(tg.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tg])]; renderTargets(); }
     const withStruct=rows.filter(r=>r.smiles).length;
     const r=rows.length?addCompounds(rows):{added:0,merged:0,dataOnly:0,bad:0};
-    let msg=`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} text record(s) (${withStruct} with SMILES). Added ${r.added}, ${r.dataOnly} data-only.`;
-    if(tg.length) msg+=` Target (POI): ${esc(tg.join(", "))}.`;
+    // ---- the biology SAR is ready now, from text alone (seconds) ----
+    Progress.done();
+    const withData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
+    const sarMsg = rows.length
+      ? `✓ Biology SAR ready — ${rows.length} compound(s), ${withStruct} with a structure, ${withData} with assay data${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}. Open the SAR / Table tab.`
+      : `Read ${pdf.numPages} page(s) but found no compound records in the text. Tick “also read drawn structures” to recover them from drawings${state.sample?"":" (claude.ai artifact only)"}.`;
+    setStatus(sarMsg, true);
+    // ---- optional, separate, background: read drawn structures (can be slow) ----
     const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
     if(visionOn){
-      const ctl=new AbortController(); state.visionAbort=ctl; Progress.stopBtn(true,()=>ctl.abort());
+      const ctl=new AbortController(); state.visionAbort=ctl;
+      Progress.start("Finding structure pages",""); Progress.stopBtn(true,()=>ctl.abort());
       const range=parseRange($("#pdfRange")?$("#pdfRange").value:"", pdf.numPages);
       const found=await findStructurePages(pdf, pageTexts, range, ctl);
+      if(!found.candidates.length){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null;
+        setStatus(sarMsg+` No drawn-structure pages were found${range?" in that range":""}.`, true); return; }
+      const perPage = state.ocsrTier==="quick"?6:state.ocsrTier==="complex"?70:35;
+      const estMin = Math.max(1, Math.round(found.candidates.length*perPage/2/60));
+      setStatus(sarMsg+` Reading ${found.candidates.length} structure page(s) in the background (~${estMin} min at “${ {quick:"Fast",default:"Balanced",complex:"Best"}[state.ocsrTier] }”). Use the SAR now, narrow with a page range, or Stop.`, true);
       const v=await visionScanPdf(pdf, found.candidates, ctl);
-      Progress.stopBtn(false); state.visionAbort=null;
-      if(v.scanned) msg+=` Scanned ${v.scanned} likely compound page(s)${range?` in your range`:` (skipped the rest of ${pdf.numPages})`}; Claude read ${v.found} structure(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. Check the “Claude-read” compounds.`;
-      else msg+=` No numbered-compound structure pages were found${range?" in that page range":""}.`;
-    } else if(!rows.length){
-      msg=`Read ${pdf.numPages} page(s) of ${esc(file.name)} but found no text records. If the structures are drawings, tick “read drawn structures too”${state.sample?"":" (available in the claude.ai artifact)"} and re-upload.`;
+      Progress.done(); Progress.stopBtn(false); state.visionAbort=null;
+      setStatus(sarMsg+` Structures: Claude read ${v.found} from ${v.scanned} page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. ⚠ verify the Claude-read ones.`, true);
     }
-    Progress.done(); setStatus(msg, r.bad===0);
   }catch(e){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null; setStatus("PDF error: "+e.message,false); }
 }
 function normId(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
@@ -1208,7 +1221,7 @@ async function visionScanPdf(pdf, pages, ctl){
     if(ctl.signal.aborted) return;
     try{
       const blob=await renderPdfPage(pdf,p);
-      const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:"complex",signal:ctl.signal});
+      const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:state.ocsrTier,signal:ctl.signal});
       (Array.isArray(arr)?arr:[]).forEach(o=>{ if(o&&o.smiles) found+=mergeVisionStructure(o,p); });
       refreshAll();
     }catch(e){ if(e.code==="cancelled"){stopped=true;} else if(e.code==="rate_limited"){rateLimited=true;ctl.abort();}
@@ -1403,6 +1416,7 @@ function bindUI(){
   if(ou){ ou.value=store.get("dl.ocsrUrl")||""; ou.onchange=()=>store.set("dl.ocsrUrl",ou.value.trim()); }
   if(oon){ oon.checked=store.get("dl.ocsrOn")==="1"; oon.onchange=()=>store.set("dl.ocsrOn",oon.checked?"1":"0"); }
   const ku=$("#keepUnnum"); if(ku){ ku.checked=state.keepUnnumbered=(store.get("dl.keepUnnum")==="1"); ku.onchange=()=>{ state.keepUnnumbered=ku.checked; store.set("dl.keepUnnum",ku.checked?"1":"0"); }; }
+  const tier=$("#ocsrTier"); if(tier){ const saved=store.get("dl.ocsrTier"); if(saved){ state.ocsrTier=saved; tier.value=saved; } tier.onchange=()=>{ state.ocsrTier=tier.value; store.set("dl.ocsrTier",tier.value); }; }
   $("#pdfIn").onchange=e=>{ const f=e.target.files[0]; if(f) extractFromPDF(f); e.target.value=""; };
   // Claude vision OCSR controls
   const dz=$("#claudeDrop");
