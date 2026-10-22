@@ -305,11 +305,13 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 
         <section class="block">
           <h3>Extract from a patent</h3>
-          <p class="help"><b>Upload a patent PDF</b> and the tool reads every page of text, then pulls <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values, and any machine-readable <b>SMILES</b> printed in tables or the supporting information (each validated with RDKit). Compounds with a SMILES are decomposed and plotted immediately; the rest are kept as data-only rows to attach a structure to. You can also paste a text excerpt instead.</p>
+          <p class="help"><b>Upload a patent PDF</b> and the tool reads every page: it pulls <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values, and any machine-readable <b>SMILES</b> in tables or the SI (each validated with RDKit). With <b>“read drawn structures too”</b> ticked, it then finds the pages with structure drawings, has Claude read each one into a SMILES, and <b>merges every structure onto its compound by example number</b> — one upload, structures and data together. You can also paste a text excerpt instead.</p>
           <div class="datarow">
             <div class="inline">
               <label class="btn small primary" style="cursor:pointer">Upload patent PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
+              <label id="pdfVisionWrap" hidden style="gap:5px;align-items:center;font-size:12px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision" checked> read drawn structures too (Claude)</label>
               <button class="btn small" id="patentBtn">Extract from pasted text</button>
+              <button class="btn small" id="visionStop" hidden>Stop reading</button>
               <span id="pdfProgress" class="help"></span>
             </div>
             <textarea id="patentArea" spellcheck="false" placeholder="…or paste an excerpt: Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
@@ -907,16 +909,77 @@ async function extractFromPDFClient(file){
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
     state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
     let text="";
-    for(let p=1;p<=pdf.numPages;p++){ prog.textContent=`Scanning page ${p} / ${pdf.numPages}…`;
+    for(let p=1;p<=pdf.numPages;p++){ prog.textContent=`Reading text, page ${p} / ${pdf.numPages}…`;
       const page=await pdf.getPage(p); const tc=await page.getTextContent();
       text += tc.items.map(i=>i.str).join(" ")+"\n"; if(page.cleanup)page.cleanup(); }
     prog.textContent="";
     const rows=extractPatentRecords(text);
-    if(!rows.length){ setStatus(`Read ${pdf.numPages} page(s) of ${esc(file.name)}, but found no compound identifiers, assay values, or machine-readable SMILES. The structures are likely drawn as images — use the OCSR companion below.`,false); return; }
     const withStruct=rows.filter(r=>r.smiles).length;
-    const r=addCompounds(rows);
-    setStatus(`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} records (${withStruct} with a SMILES). Added ${r.added} structures, merged onto ${r.merged}, ${r.dataOnly} data-only. Any drawn-only structures need the OCSR companion.`, r.bad===0);
+    const r=rows.length?addCompounds(rows):{added:0,merged:0,dataOnly:0,bad:0};
+    const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
+    let msg=`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} text record(s) (${withStruct} with SMILES). Added ${r.added}, ${r.dataOnly} data-only.`;
+    setStatus(msg + (visionOn?" Now reading drawn structures…":""), true);
+    if(visionOn){
+      const v=await visionScanPdf(pdf);
+      if(v.scanned) msg+=` Claude read ${v.found} structure(s) from ${v.scanned} drawing page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. Check the “Claude-read” compounds against the drawings.`;
+      else msg+=` No pages with drawings were detected for Claude to read.`;
+    } else if(!rows.length){
+      msg=`Read ${pdf.numPages} page(s) of ${esc(file.name)} but found no text records. If the structures are drawings, tick “read drawn structures too”${state.sample?"":" (available in the claude.ai artifact)"} and re-upload.`;
+    }
+    setStatus(msg, r.bad===0);
   }catch(e){ prog.textContent=""; setStatus("PDF error: "+e.message,false); }
+}
+function normId(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+async function pageHasGraphics(pdf,n){
+  try{ const page=await pdf.getPage(n); const ops=await page.getOperatorList(); const O=pdfjsLib.OPS;
+    let img=0,paths=0;
+    for(const fn of ops.fnArray){
+      if(fn===O.paintImageXObject||fn===O.paintInlineImageXObject||fn===O.paintImageMaskXObject) img++;
+      else if(fn===O.constructPath||fn===O.stroke||fn===O.fill||fn===O.eoFill||fn===O.closeStroke||fn===O.fillStroke) paths++;
+    }
+    if(page.cleanup)page.cleanup();
+    return img>0 || paths>=30; // raster image, or many line segments (a drawn structure)
+  }catch(e){ return false; }
+}
+// Merge a Claude-read structure onto its matching text record (by compound label), keeping the data.
+function mergeVisionStructure(vid,vsmiles){
+  const canon=withMol(vsmiles,m=>m.get_smiles()); if(!canon) return 0;
+  const nid=normId(vid);
+  const tgt=nid?state.compounds.find(c=>normId(c.id)===nid):null;
+  if(tgt){
+    if(tgt.dataOnly||!tgt.valid){ const i=state.compounds.indexOf(tgt);
+      const base=(tgt.series||"patent").replace(/ · Claude-read.*/,"");
+      state.compounds[i]=analyse({id:tgt.id,name:tgt.name,series:base+" · Claude-read",smiles:canon,data:tgt.data||{}});
+      return 1; }
+    return 0; // already has a structure from the text — keep the exact one
+  }
+  const id=vid||("Claude-"+(state.compounds.length+1));
+  state.compounds.push(analyse({id,name:id,series:"patent · Claude-read (verify)",smiles:canon,data:{}}));
+  return 1;
+}
+async function visionScanPdf(pdf){
+  const prog=$("#pdfProgress"), stop=$("#visionStop");
+  prog.textContent="Finding pages with structure drawings…";
+  const pages=[]; for(let p=1;p<=pdf.numPages;p++){ if(await pageHasGraphics(pdf,p)) pages.push(p); }
+  if(!pages.length){ prog.textContent=""; return {scanned:0,found:0}; }
+  const ctl=new AbortController(); state.visionAbort=ctl;
+  stop.hidden=false; stop.onclick=()=>ctl.abort();
+  let done=0,found=0,stopped=false,rateLimited=false;
+  const worker=async(p)=>{
+    if(ctl.signal.aborted) return;
+    try{
+      const blob=await renderPdfPage(pdf,p);
+      const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:"complex",signal:ctl.signal});
+      (Array.isArray(arr)?arr:[]).forEach(o=>{ if(o&&o.smiles) found+=mergeVisionStructure(o.id,o.smiles); });
+      refreshAll();
+    }catch(e){ if(e.code==="cancelled"){stopped=true;} else if(e.code==="rate_limited"){rateLimited=true;ctl.abort();}
+      else if(e.code==="not_granted"||e.code==="sampling_disabled"){stopped=true;ctl.abort();} }
+    done++; if(!ctl.signal.aborted) prog.textContent=`Reading structures with Claude… ${done}/${pages.length} pages (${found} found)`;
+  };
+  const queue=[...pages]; const run=async()=>{ while(queue.length && !ctl.signal.aborted){ await worker(queue.shift()); } };
+  await Promise.all([run(),run()]); // small concurrency to respect rate limits
+  stop.hidden=true; state.visionAbort=null; prog.textContent="";
+  return {scanned:pages.length, found, stopped, rateLimited};
 }
 
 /* ============================ Claude vision OCSR (in-browser) ============================ */
@@ -940,6 +1003,7 @@ async function resolveClaude(){
 }
 function updateClaudeUI(){
   const note=$("#claudeNote"), tools=$("#claudeTools"); if(!note||!tools) return;
+  const vw=$("#pdfVisionWrap"); if(vw){ vw.hidden=!(state.sample&&state.sampleImages); if(!vw.hidden) vw.style.display="flex"; }
   if(state.sample && state.sampleImages){
     tools.hidden=false;
     note.textContent="Claude reads structure drawings into SMILES on your own Claude account — it asks your permission on first use.";

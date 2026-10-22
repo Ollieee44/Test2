@@ -87,13 +87,17 @@ tables and SI). For those compounds you get structures + SAR straight from the P
 A structure that appears **only as a drawing** (an image) needs optical
 chemical-structure recognition. There are three routes, in order of least setup:
 
-**1. Claude vision, in the browser (no install).** In the published claude.ai
-artifact, the **Data** tab has *Read drawn structures with Claude*: snip a
-structure (or render a page of the loaded PDF) and Claude reads it into SMILES on
-your own account. Every result is validated with RDKit and shown next to the
-drawing to **check before adding**. It runs only in the claude.ai artifact (the
-page calls Claude there) and is a strong assist, not guaranteed correct on complex
-degraders — so verify each structure.
+**1. Claude vision, in the browser (no install) — one upload for everything.** In
+the published claude.ai artifact, tick **“read drawn structures too”** next to
+*Upload patent PDF*. The tool then reads the text (identifiers + assay data +
+inline SMILES), finds the pages that contain structure drawings, has Claude read
+each drawing into a SMILES on your own account, validates it with RDKit, and
+**merges every structure onto its compound by example number** — so one upload
+gives you structures and data together. Structures Claude read are tagged
+“Claude-read” so you can check them against the drawings (it's a strong assist,
+not guaranteed correct on complex degraders). The *Read drawn structures with
+Claude* panel also lets you read a single snipped image or one rendered page by
+hand. This runs only in the claude.ai artifact, where the page can call Claude.
 
 **2. The local companion (install, most accurate on batches).** For image-only
 patents processed in bulk, run the bundled companion:
