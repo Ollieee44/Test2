@@ -116,10 +116,20 @@ section.block>h3{font:600 11px var(--f-body);letter-spacing:.07em;text-transform
 .idepict .rdk{line-height:0}
 .idepict .rdk svg,.idepict .ovl{display:block;width:100%;height:auto}
 .idepict .ovl{position:absolute;inset:0}
-.idepict .ovl circle[data-atom]:hover{fill:var(--accent)!important;fill-opacity:.2}
+.idepict .ovl .hotspot{cursor:pointer}
+.idepict .ovl .hotspot:hover{fill:var(--accent)!important;fill-opacity:.22}
 .selbar{margin-top:9px;font-size:12.5px;line-height:1.5}
 .selbar code{font-family:var(--f-mono);background:var(--panel-2);padding:2px 6px;border-radius:5px;font-size:11px;word-break:break-all}
-.selrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.selrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px}
+.defhdr{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:7px 10px;margin-bottom:8px;font-size:12.5px}
+.region-assign{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0}
+@media(min-width:520px){.region-assign{grid-template-columns:1fr 1fr 1fr}}
+.rbig{display:flex;align-items:center;gap:8px;text-align:left;border:1.5px solid var(--line);background:var(--panel);border-radius:9px;padding:9px 11px;font-size:12.5px;line-height:1.25;cursor:pointer;transition:border-color .12s,background .12s}
+.rbig:hover:not([disabled]){border-color:var(--accent);background:var(--accent-soft)}
+.rbig[disabled]{opacity:.4;cursor:not-allowed}
+.rbig .sw{width:13px;height:13px;border-radius:4px;flex:none}
+.region-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--ink);padding:6px 0;border-top:1px solid var(--line)}
+.apply-all{margin-top:9px;padding:9px 11px;border:1.5px dashed var(--accent);border-radius:9px;background:var(--accent-soft)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;font-weight:500}
@@ -451,7 +461,7 @@ const state = {
   sort:{key:"id",dir:1}, hlSmarts:"",
   chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
   sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
-  keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick",
+  keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick", regionTemplates:{},
 };
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
@@ -639,6 +649,34 @@ function graphOf(c){ return withMol(c.smiles,m=>parseGraph(m.get_molblock())) ||
 function pathBetween(adj,a,b){ const prev=new Array(adj.length).fill(-2); prev[a]=-1; const q=[a];
   for(let h=0;h<q.length;h++){ const u=q[h]; if(u===b) break; for(const v of adj[u]) if(prev[v]===-2){prev[v]=u;q.push(v);} }
   if(prev[b]===-2) return null; const p=[]; let c=b; while(c!==-1){p.push(c);c=prev[c];} return p.reverse(); }
+function pointInPoly(pt,poly){ const [x,y]=pt; let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){ const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/((yj-yi)||1e-9)+xi)) inside=!inside; } return inside; }
+function floodExclude(adj,start,ex){ const seen=new Set([start]),st=[start];
+  while(st.length){ const u=st.pop(); for(const v of adj[u]) if(!ex.has(v)&&!seen.has(v)){ seen.add(v); st.push(v); } } return seen; }
+function matchTemplate(m,smarts){ if(!smarts) return []; const q=state.rdkit.get_qmol(smarts.replace(/@/g,""));
+  let atoms=[]; if(q){ if(q.is_valid()){ try{ const mt=JSON.parse(m.get_substruct_match(q)); if(mt&&mt.atoms)atoms=mt.atoms; }catch(e){} } q.delete(); } return atoms; }
+// Build manualRegions for a molecule from an E3 and/or warhead atom match; infer the linker between.
+function regionsFromAnchors(g,e3a,wara){
+  if(e3a.length && wara.length){ const path=shortestPath(g.adj,e3a,wara); const interior=path?path.slice(1,-1).filter(a=>!g.ring[a]):[];
+    const ls=new Set(interior); const e3c=floodExclude(g.adj,e3a[0],ls);
+    return {e3:[...e3c],lnk:interior,war:[...Array(g.na).keys()].filter(a=>!e3c.has(a)&&!ls.has(a))}; }
+  if(e3a.length){ const dc=autoDecompose(g,e3a); return dc?{e3:dc.e3,lnk:dc.linker,war:dc.warhead}:null; }
+  if(wara.length){ const dc=autoDecompose(g,wara); return dc?{e3:dc.warhead,lnk:dc.linker,war:dc.e3}:null; }
+  return null;
+}
+// push the saved E3/warhead templates to every compound; infer each linker
+function applyTemplatesToAll(){
+  const t=state.regionTemplates||{}; if(!t.e3&&!t.war) return 0; let n=0;
+  state.compounds.forEach(c=>{ if(!c.valid) return;
+    const mr=withMol(c.smiles,m=>{ const g=parseGraph(m.get_molblock());
+      const e3a=matchTemplate(m,t.e3), wara=matchTemplate(m,t.war);
+      return (e3a.length||wara.length)? regionsFromAnchors(g,e3a,wara) : null; });
+    if(mr){ c.manualRegions=mr; applyManualRegions(c); n++; } });
+  state.showRegions=true; refreshAll(); return n;
+}
+function inferLinkerIfBoth(c){ const mr=c.manualRegions; if(!mr||!(mr.e3||[]).length||!(mr.war||[]).length) return;
+  const nr=withMol(c.smiles,m=>regionsFromAnchors(parseGraph(m.get_molblock()), mr.e3, mr.war)); if(nr) c.manualRegions=nr; }
 function applyManualRegions(c){ // rebuild regionMap + linker length from c.manualRegions
   const mr=c.manualRegions; if(!mr) return;
   const reg={}; (mr.war||[]).forEach(a=>reg[a]="war"); (mr.e3||[]).forEach(a=>reg[a]="e3"); (mr.lnk||[]).forEach(a=>reg[a]="lnk");
@@ -780,38 +818,63 @@ function renderDetail(){
     <section class="block"><h3>Biological data</h3><div class="bio">${bioCells}</div></section>
     <section class="block"><h3>Canonical SMILES</h3><p class="help" style="word-break:break-all"><code>${esc(c.smiles)}</code></p></section>
   `;
-  const sel=new Set();
+  const sel=new Set(); let coords={}, sz={W:440,H:320};
   const renderStruct=()=>{
     const svg=depict(c,{w:440,h:320,regions:state.showRegions,extraSmarts:state.hlSmarts});
-    const coords=atomCoordsFromSvg(svg), sz=svgSize(svg);
-    const markers=[...sel].map(a=>coords[a]?`<circle cx='${coords[a][0]}' cy='${coords[a][1]}' r='8.5' fill='var(--accent)' opacity='0.35'/>`:"").join("");
-    const hot=Object.keys(coords).map(a=>`<circle cx='${coords[a][0]}' cy='${coords[a][1]}' r='6.5' fill='transparent' data-atom='${a}' style='cursor:pointer;pointer-events:all'/>`).join("");
-    $("#bigDepict").innerHTML=`<div class="idepict"><div class="rdk">${svg}</div><svg class="ovl" viewBox='0 0 ${sz.W} ${sz.H}' preserveAspectRatio='xMidYMid meet'>${markers}${hot}</svg></div>`;
-    $("#bigDepict").querySelectorAll('[data-atom]').forEach(el=>el.onclick=()=>{ const a=+el.dataset.atom; sel.has(a)?sel.delete(a):sel.add(a); renderStruct(); renderSelBar(); });
+    coords=atomCoordsFromSvg(svg); sz=svgSize(svg);
+    const markers=[...sel].map(a=>coords[a]?`<circle cx='${coords[a][0]}' cy='${coords[a][1]}' r='8.5' fill='var(--accent)' opacity='0.4'/>`:"").join("");
+    const hot=Object.keys(coords).map(a=>`<circle cx='${coords[a][0]}' cy='${coords[a][1]}' r='5' fill='transparent' class='hotspot' data-atom='${a}'/>`).join("");
+    $("#bigDepict").innerHTML=`<div class="idepict"><div class="rdk">${svg}</div>
+      <svg class="ovl" viewBox='0 0 ${sz.W} ${sz.H}' preserveAspectRatio='xMidYMid meet'>
+        <rect x='0' y='0' width='${sz.W}' height='${sz.H}' fill='transparent' style='pointer-events:all;cursor:crosshair'/>
+        ${markers}${hot}<polyline id='lassoPath' fill='color-mix(in srgb,var(--accent) 12%,transparent)' stroke='var(--accent)' stroke-width='1.4' stroke-dasharray='4 3' points=''/>
+      </svg></div>`;
+    attachLasso($("#bigDepict .ovl"));
   };
+  const attachLasso=ovl=>{ let pts=[],dragging=false,moved=0;
+    const toVB=e=>{ const p=ovl.createSVGPoint(); p.x=e.clientX; p.y=e.clientY; const l=p.matrixTransform(ovl.getScreenCTM().inverse()); return [l.x,l.y]; };
+    const onMove=e=>{ if(!dragging)return; const v=toVB(e); const last=pts[pts.length-1]; moved+=Math.hypot(v[0]-last[0],v[1]-last[1]); pts.push(v);
+      const pl=$("#lassoPath"); if(pl) pl.setAttribute("points",pts.map(p=>p.join(",")).join(" ")); };
+    const onUp=()=>{ if(!dragging)return; dragging=false; window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp);
+      if(moved<6){ const [x,y]=pts[0]; let best=-1,bd=1e9; for(const a in coords){ const d=Math.hypot(coords[a][0]-x,coords[a][1]-y); if(d<bd){bd=d;best=+a;} }
+        if(best>=0&&bd<11){ sel.has(best)?sel.delete(best):sel.add(best); } }
+      else { for(const a in coords){ if(pointInPoly(coords[a],pts)) sel.add(+a); } }
+      renderStruct(); renderSelBar(); };
+    ovl.onpointerdown=e=>{ e.preventDefault(); dragging=true; moved=0; pts=[toVB(e)]; window.addEventListener("pointermove",onMove); window.addEventListener("pointerup",onUp); };
+  };
+  const stat=r=>{ const n=(r==='war'?c.waratoms:r==='e3'?(c.e3region||c.e3atoms):c.lnkatoms); return n&&n.length?`${n.length} atoms ✓`:"<span style='color:var(--muted)'>not set</span>"; };
   const renderSelBar=()=>{
     const bar=$("#selBar"); const arr=[...sel].sort((x,y)=>x-y);
-    if(!arr.length){ bar.innerHTML=`<span class="help">Click atoms on the structure to select them — the fragment SMILES appears here. Then copy it, or assign the selection to a region.</span>`; return; }
-    const frag=fragmentSmiles(c.smiles,arr);
-    bar.innerHTML=`<div class="selrow"><b>${arr.length} atom${arr.length>1?"s":""}</b> · <code>${esc(frag||"(disconnected selection)")}</code>
-        ${frag?`<button class="btn small" id="selCopy">Copy SMILES</button>`:""}<button class="btn small" id="selClear">Clear</button></div>
-      <div class="selrow" style="margin-top:6px"><span class="help">assign →</span>
-        <button class="btn small" data-reg="war" style="border-color:var(--reg-war)">Warhead</button>
-        <button class="btn small" data-reg="lnk" style="border-color:var(--reg-lnk)">Linker</button>
-        <button class="btn small" data-reg="e3" style="border-color:var(--reg-e3)">E3</button>
-        <button class="btn small" id="linkEnds" title="select exactly 2 atoms = the linker ends">Linker from 2 ends</button>
-        ${c.manual?`<button class="btn small" id="resetRegions">Reset to auto</button>`:''}</div>`;
-    const cp=$("#selCopy"); if(cp) cp.onclick=e=>copyText(frag,e.currentTarget);
-    $("#selClear").onclick=()=>{ sel.clear(); renderStruct(); renderSelBar(); };
-    bar.querySelectorAll('[data-reg]').forEach(b=>b.onclick=()=>assignRegion(b.dataset.reg));
-    const le=$("#linkEnds"); if(le) le.onclick=setLinkerFromEnds;
-    const rr=$("#resetRegions"); if(rr) rr.onclick=resetRegions;
+    const frag=arr.length?fragmentSmiles(c.smiles,arr):"";
+    const tkeys=Object.keys(state.regionTemplates||{}).filter(k=>state.regionTemplates[k]);
+    const nValid=state.compounds.filter(x=>x.valid).length;
+    bar.innerHTML=`
+      <div class="defhdr"><b>Define regions:</b> drag a loop around part of the structure (or click atoms), then press what it is.</div>
+      <div class="selrow">${arr.length?`<b>${arr.length} atom${arr.length>1?"s":""} selected</b> · <code>${esc(frag||"(disconnected)")}</code> ${frag?`<button class="btn small" id="selCopy">Copy SMILES</button>`:""}<button class="btn small" id="selClear">Clear</button>`:`<span class="help">Nothing selected yet.</span>`}</div>
+      <div class="region-assign">
+        <button class="rbig" data-reg="war" ${arr.length?"":"disabled"}><span class="sw" style="background:var(--reg-war)"></span>This is the <b>Warhead / target (POI)</b></button>
+        <button class="rbig" data-reg="e3" ${arr.length?"":"disabled"}><span class="sw" style="background:var(--reg-e3)"></span>This is the <b>E3 ligand</b></button>
+        <button class="rbig" data-reg="lnk" ${arr.length?"":"disabled"}><span class="sw" style="background:var(--reg-lnk)"></span>This is the <b>Linker</b></button>
+      </div>
+      <div class="region-status">Warhead ${stat('war')} · E3 ${stat('e3')} · Linker <b>${c.desc.linker_len!=null?c.desc.linker_len+" atoms":""}</b>
+        <button class="btn small" id="linkEnds" title="select the two linker ends">Linker from 2 ends</button>
+        ${c.manual?`<button class="btn small" id="resetRegions">Reset to auto</button>`:""}</div>
+      <p class="help">The <b>linker is inferred</b> as the chain between the warhead and the E3 ligand — define those two and it fills in.</p>
+      ${tkeys.length?`<div class="apply-all"><button class="btn small primary" id="applyAll">Apply this ${tkeys.map(k=>k==='war'?'warhead':'E3').join(" + ")} to all ${nValid} compounds</button><div class="help" style="margin-top:4px">Matches the same fragment on every compound and infers each linker — define it once, done for the series.</div></div>`:""}`;
+    const cp=$("#selCopy"); if(cp)cp.onclick=e=>copyText(frag,e.currentTarget);
+    const sc=$("#selClear"); if(sc)sc.onclick=()=>{ sel.clear(); renderStruct(); renderSelBar(); };
+    bar.querySelectorAll('[data-reg]').forEach(b=>{ if(!b.disabled)b.onclick=()=>assignRegion(b.dataset.reg); });
+    const le=$("#linkEnds"); if(le)le.onclick=setLinkerFromEnds;
+    const rr=$("#resetRegions"); if(rr)rr.onclick=resetRegions;
+    const aa=$("#applyAll"); if(aa)aa.onclick=()=>{ const n=applyTemplatesToAll(); toast(`Applied to ${n} compound(s) — linkers inferred.`); };
   };
   const ensureManual=()=>{ if(!c.manualRegions) c.manualRegions={e3:[...(c.e3region||[])],lnk:[...(c.lnkatoms||[])],war:[...(c.waratoms||[])]}; };
   const refresh=()=>{ state.showRegions=true; renderTable(); renderGallery(); renderDetail(); };
   const assignRegion=r=>{ ensureManual(); const s=[...sel];
     ["e3","lnk","war"].forEach(k=>{ c.manualRegions[k]=(c.manualRegions[k]||[]).filter(a=>!s.includes(a)); });
     c.manualRegions[r]=[...new Set([...(c.manualRegions[r]||[]),...s])];
+    if(r==="e3"||r==="war"){ const frag=fragmentSmiles(c.smiles,s); if(frag) state.regionTemplates[r]=frag; }
+    inferLinkerIfBoth(c);
     applyManualRegions(c); sel.clear(); refresh(); };
   const setLinkerFromEnds=()=>{ if(sel.size!==2){ toast("Select exactly 2 atoms — the two ends of the linker."); return; }
     const g=graphOf(c); if(!g) return; const [a,b]=[...sel]; const path=pathBetween(g.adj,a,b); if(!path){ toast("No bonded path between those two atoms."); return; }

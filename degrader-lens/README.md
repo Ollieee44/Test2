@@ -42,10 +42,15 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 - **`index.html`** — the original: opens with a loaded sample dataset.
 - **`index-v4.html`** — v3 plus an **interactive structure view** and a **fast,
   decoupled PDF flow**. The depiction is clean (standard element colours; region
-  highlighting off by default), every atom is **clickable** — select atoms to read
-  and copy the **fragment SMILES** — and you can **set the regions yourself** (assign
-  a selection to Warhead / Linker / E3, or pick the two linker ends and it splits the
-  rest). On a PDF, the **biology SAR comes out in seconds from the text alone**
+  highlighting off by default) and you define the regions directly on the drawing:
+  **drag a lasso** around part of the structure (or click individual atoms) to
+  select it — the **fragment SMILES** is read out and copyable — then press one of
+  three obvious buttons (**Warhead / target (POI)**, **E3 ligand**, **Linker**).
+  Define the **warhead and E3 on one example** and **“apply to all compounds”**
+  pushes the same fragments onto every structure in the series and **infers each
+  linker as the chain in between** — set it once, done for the whole set. (You can
+  also pick the two linker ends and it splits the rest.) On a PDF, the **biology SAR
+  comes out in seconds from the text alone**
   (compound numbers + assay data + any inline SMILES, all plotted — even for
   compounds with no structure); reading **drawn** structures with Claude is a
   separate, optional background step with a **Fast / Balanced / Best** speed control,
