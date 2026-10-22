@@ -49,7 +49,10 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   (compound numbers + assay data + any inline SMILES, all plotted — even for
   compounds with no structure); reading **drawn** structures with Claude is a
   separate, optional background step with a **Fast / Balanced / Best** speed control,
-  an ETA and a Stop button, so it never blocks the SAR.
+  an ETA and a Stop button, so it never blocks the SAR. The **assay fields are not
+  pre-defined** — the table columns and SAR axes are built from whatever the
+  document contains, including **qualitative / bucketed potency** (+, ++, +++, letter
+  grades, % inhibition), which the SAR can plot as a categorical axis.
 - **`index-v3.html`** — v2 plus: **automatic scaffold-free decomposition** (warhead/
   linker/E3 split and linker length populate for any PROTAC, no scaffold needed),
   **target (POI) detection** from the document text, **tidy-up** that keeps only

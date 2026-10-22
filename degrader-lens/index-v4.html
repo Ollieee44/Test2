@@ -168,6 +168,7 @@ tbody tr:hover td{background:var(--panel-2)}
 tbody tr[aria-selected="true"] td{background:var(--accent-soft)}
 td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .pcell{border-radius:5px;padding:1px 7px;font-family:var(--f-mono);font-weight:600}
+.bucket{border-radius:5px;padding:1px 7px;font-family:var(--f-mono);font-weight:600;background:var(--accent-soft);color:var(--accent)}
 
 /* ---- data tab ---- */
 .datarow{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
@@ -429,9 +430,18 @@ const DESCRIPTOR_FIELDS = [
   ["rings","Rings","",false],["fsp3","Fsp³","",false],["heavy","Heavy atoms","",false],
   ["linker_len","Linker length","atoms",false],["linker_peg_o","Linker ethers","O",false],
 ];
+// Nice labels for well-known keys. NOT a fixed schema — the app shows whatever assay
+// fields the scanned document actually contains (see assayKeys / labelMeta).
 const ASSAY_LABELS = { dc50_nm:["DC₅₀","nM",true], dmax_pct:["Dmax","%",false],
-  target_ic50_nm:["Target IC₅₀","nM",true], ec50_nm:["EC₅₀","nM",true],
-  ki_nm:["Ki","nM",true], kd_nm:["Kd","nM",true], ternary_kd_nm:["Ternary Kd","nM",true] };
+  target_ic50_nm:["Target IC₅₀","nM",true], ic50_nm:["IC₅₀","nM",true], ec50_nm:["EC₅₀","nM",true],
+  ki_nm:["Ki","nM",true], kd_nm:["Kd","nM",true], ternary_kd_nm:["Ternary Kd","nM",true],
+  gi50_nm:["GI₅₀","nM",true], pct_inhibition:["% inhibition","%",false], potency:["Potency",""] };
+function labelMeta(key){ const m=ASSAY_LABELS[key]; if(m) return {label:m[0],unit:m[1]||"",log:!!m[2]};
+  let unit="",k=String(key);
+  if(/_nm$/.test(k)){unit="nM";k=k.slice(0,-3);} else if(/_um$/.test(k)){unit="µM";k=k.slice(0,-3);}
+  else if(/_pct$/.test(k)){unit="%";k=k.slice(0,-4);} else if(/_pm$/.test(k)){unit="pM";k=k.slice(0,-3);}
+  const label=k.replace(/_/g," ").replace(/\b([a-z])/g,x=>x.toUpperCase());
+  return {label,unit,log:/50$|^k[id]/.test(k)}; }
 
 /* ============================ state ============================ */
 const state = {
@@ -715,8 +725,8 @@ function renderDetail(){
     : `<div class="empty">No compounds yet — upload a patent/paper PDF or a dataset in the <b>Data</b> panel.</div>`;
     return; }
   if(c.dataOnly){ const bio=c.data||{};
-    const cells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
-      return `<div class="prop"><div class="pl">${esc(meta[0])}</div><div class="pv" style="color:var(--accent)">${fmtNum(bio[k],meta[1]==="%"?0:1)} <small>${esc(meta[1])}</small></div></div>`; }).join("")||'<p class="help">No values.</p>';
+    const cells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const m=labelMeta(k); const num=typeof bio[k]==="number";
+      return `<div class="prop"><div class="pl">${esc(m.label)}</div><div class="pv" style="color:var(--accent)">${num?fmtNum(bio[k],m.unit==="%"?0:1):esc(String(bio[k]))}${num&&m.unit?` <small>${esc(m.unit)}</small>`:""}</div></div>`; }).join("")||'<p class="help">No values.</p>';
     pane.innerHTML=`<h2>${esc(c.id)}</h2><p class="sub">${esc(c.series||"")} · data-only record</p>
       <div class="status ok" style="margin-bottom:12px">No structure attached. Add a SMILES (CSV/SDF) or an entry with the same identifier to attach these values to a molecule — then it joins the gallery and SAR views.</div>
       <section class="block"><h3>Reported data</h3><div class="bio">${cells}</div></section>`; return; }
@@ -727,8 +737,8 @@ function renderDetail(){
   const region=(r,extra)=>{ const on=(r==='war'?c.waratoms:r==='e3'?(c.e3region||c.e3atoms||[]):c.lnkatoms).length>0;
     return `<div class="region"><span class="swatch" style="background:var(--reg-${r})"></span><div><div class="rname">${REGION[r].label}</div><div class="rmeta">${on?extra:'not identified'}</div></div></div>`; };
   const bio=c.data||{};
-  const bioCells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
-    return prop(meta[0],fmtNum(bio[k], meta[1]==="%"?0:1),meta[1],false); }).join("")||'<p class="help">No biological data on this compound.</p>';
+  const bioCells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const m=labelMeta(k); const num=typeof bio[k]==="number";
+    return prop(m.label, num?fmtNum(bio[k], m.unit==="%"?0:1):esc(String(bio[k])), num?m.unit:"", false); }).join("")||'<p class="help">No biological data on this compound.</p>';
 
   const reviewBanner = c.needsReview ? `<div class="status" style="background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <span>⚠ <b>Needs review</b> — ${esc(c.reviewReason||"Claude-read")}. Compare the structure to the drawing.</span>
@@ -841,17 +851,31 @@ async function recheckWithClaude(id){
 }
 
 /* ---- SAR chart ---- */
+// assay fields are discovered from the loaded compounds, not pre-defined
+function assayKeys(){ const seen=new Set(),order=[];
+  state.compounds.forEach(c=>{ const d=c.data||{}; Object.keys(d).forEach(k=>{ if(d[k]!=null && !seen.has(k)){ seen.add(k); order.push(k); } }); });
+  return order; }
+function keyIsNumeric(k){ let any=false; for(const c of state.compounds){ const v=c.data&&c.data[k]; if(v!=null){ if(typeof v==="number")any=true; else return false; } } return any; }
 function numericFields(){
   const fields=[...DESCRIPTOR_FIELDS.map(f=>({key:f[0],label:f[1],unit:f[2],from:"desc"}))];
-  const seen=new Set();
-  state.compounds.forEach(c=>{ const d=c.data||{}; Object.keys(d).forEach(k=>{ if(d[k]!=null && typeof d[k]==="number" && !seen.has(k)){ seen.add(k);
-    const meta=ASSAY_LABELS[k]; fields.push({key:k,label:meta?meta[0]:k,unit:meta?meta[1]:"",from:"data",log:meta?meta[2]:false}); } }); });
+  assayKeys().forEach(k=>{ if(keyIsNumeric(k)){ const m=labelMeta(k); fields.push({key:k,label:m.label,unit:m.unit,from:"data",log:m.log}); } });
   return fields;
 }
+function categoricalFields(){ return assayKeys().filter(k=>!keyIsNumeric(k)).map(k=>{ const m=labelMeta(k); return {key:k,label:m.label,unit:"",from:"data",cat:true}; }); }
+function allChartFields(){ return [...numericFields(),...categoricalFields()]; }
+// order category values low→high potency where recognisable (+ buckets by count, letter grades)
+function catOrder(key){ const vals=[...new Set(state.compounds.map(c=>c.data&&c.data[key]).filter(v=>v!=null).map(String))];
+  if(vals.every(v=>/^\++$/.test(v))) return vals.sort((a,b)=>a.length-b.length);
+  if(vals.every(v=>/^[A-E]$/i.test(v))) return vals.sort((a,b)=>b.toUpperCase().localeCompare(a.toUpperCase()));
+  return vals.sort(); }
 function fieldVal(c,key){ // data (assay) values plot even for data-only rows; descriptors need a structure
   if(c.desc&&c.desc[key]!=null) return c.desc[key];
   if(c.data&&c.data[key]!=null) return c.data[key]; return null; }
-function fieldMeta(key){ return numericFields().find(f=>f.key===key); }
+function fieldMeta(key){ return allChartFields().find(f=>f.key===key); }
+function ensureChartAxes(){ const f=allChartFields(); const keys=f.map(x=>x.key);
+  if(!keys.includes(state.chart.x)) state.chart.x = keys.includes("linker_len")?"linker_len":(keys[0]||"mw");
+  const assay=f.find(x=>x.from==="data"); const yf=f.find(x=>x.key===state.chart.y);
+  if(!yf || (!state.chart.yUserSet && assay && yf.from!=="data")) state.chart.y = assay?assay.key:(keys.find(k=>k!==state.chart.x)||keys[0]||"mw"); }
 function seriesColorVar(c){ // colour by E3 ligase or series
   if(state.chart.color==="ligase"){ const k=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE");
     return {CRBN:"--s1",VHL:"--s2",MDM2:"--s3",DCAF15:"--s4",GLUE:"--muted",NONE:"--muted"}[k]||"--muted"; }
@@ -861,67 +885,76 @@ function seriesColorVar(c){ // colour by E3 ligase or series
 function seriesKey(c){ return state.chart.color==="ligase" ? (c.e3?c.e3.ligase:(c.isGlue?"Glue":"No anchor")) : (c.series||"—"); }
 
 function renderChartControls(){
-  const flds=numericFields();
-  const opt=(sel)=>flds.map(f=>`<option value="${f.key}" ${f.key===sel?"selected":""}>${esc(f.label)}${f.unit?` (${f.unit})`:""}</option>`).join("");
+  ensureChartAxes();
+  const flds=allChartFields();
+  const opt=(sel)=>flds.map(f=>`<option value="${f.key}" ${f.key===sel?"selected":""}>${esc(f.label)}${f.unit?` (${f.unit})`:""}${f.cat?" ⋯":""}</option>`).join("");
   $("#chartCtrls").innerHTML=`
     <div class="field"><label>X axis</label><select id="xSel">${opt(state.chart.x)}</select></div>
     <div class="field"><label>Y axis</label><select id="ySel">${opt(state.chart.y)}</select></div>
     <div class="field"><label>Colour by</label><select id="cSel"><option value="ligase" ${state.chart.color==="ligase"?"selected":""}>E3 ligase</option><option value="series" ${state.chart.color==="series"?"selected":""}>Series</option></select></div>
     <div class="field"><label>Y scale</label><button class="btn small" id="logBtn" aria-pressed="${state.chart.log}">log₁₀</button></div>`;
   $("#xSel").onchange=e=>{state.chart.x=e.target.value;renderChart();};
-  $("#ySel").onchange=e=>{state.chart.y=e.target.value;renderChart();};
+  $("#ySel").onchange=e=>{state.chart.y=e.target.value;state.chart.yUserSet=true;renderChart();};
   $("#cSel").onchange=e=>{state.chart.color=e.target.value;renderChart();};
   $("#logBtn").onclick=e=>{state.chart.log=!state.chart.log;e.currentTarget.setAttribute("aria-pressed",state.chart.log);renderChart();};
 }
 function renderChart(){
   const svg=$("#chart"); const W=640,H=380, m={l:64,r:18,t:16,b:52};
   const xm=fieldMeta(state.chart.x), ym=fieldMeta(state.chart.y);
-  const pts=state.compounds.map(c=>({c,x:fieldVal(c,state.chart.x),y:fieldVal(c,state.chart.y)})).filter(p=>p.x!=null&&p.y!=null&&!isNaN(p.x)&&!isNaN(p.y));
-  const canLog = state.chart.log && pts.every(p=>p.y>0);
+  const xCat=!!(xm&&xm.cat), yCat=!!(ym&&ym.cat);
+  const xCats=xCat?catOrder(state.chart.x):null, yCats=yCat?catOrder(state.chart.y):null;
+  const toX=v=>xCat?xCats.indexOf(String(v)):v, toY=v=>yCat?yCats.indexOf(String(v)):v;
+  const pts=state.compounds.map(c=>{const rx=fieldVal(c,state.chart.x),ry=fieldVal(c,state.chart.y);return {c,rx,ry,x:toX(rx),y:toY(ry)};})
+    .filter(p=>p.rx!=null&&p.ry!=null&&p.x!=null&&p.y!=null&&p.x>=0&&p.y>=0&&!isNaN(+p.x)&&!isNaN(+p.y));
+  const canLog = state.chart.log && !yCat && pts.every(p=>p.y>0);
   const yAcc = canLog? (v=>Math.log10(v)) : (v=>v);
   if(!pts.length){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--muted)" font-size="14">No compounds have both ${esc(xm?xm.label:state.chart.x)} and ${esc(ym?ym.label:state.chart.y)}.</text>`; $("#chartLegend").innerHTML=""; $("#chartNote").textContent=""; return; }
   const xs=pts.map(p=>p.x), ys=pts.map(p=>yAcc(p.y));
   let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
   if(xmin===xmax){xmin-=1;xmax+=1;} if(ymin===ymax){ymin-=1;ymax+=1;}
-  const padx=(xmax-xmin)*0.08, pady=(ymax-ymin)*0.1; xmin-=padx;xmax+=padx;ymin-=pady;ymax+=pady;
+  if(xCat){xmin-=0.6;xmax+=0.6;} else {const p=(xmax-xmin)*0.08||0.5;xmin-=p;xmax+=p;}
+  if(yCat){ymin-=0.6;ymax+=0.6;} else {const p=(ymax-ymin)*0.1||0.5;ymin-=p;ymax+=p;}
   const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
-  const Y=v=>H-m.b-(yAcc(v)-ymin)/(ymax-ymin)*(H-m.t-m.b);
   const Yraw=v=>H-m.b-(v-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  const Yp=v=>Yraw(yAcc(v));
   let g=`<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="none"/>`;
-  // gridlines + ticks
-  const yticks=niceTicks(ymin,ymax,5), xticks=niceTicks(xmin,xmax,6);
-  yticks.forEach(t=>{ const y=Yraw(t); g+=`<line x1="${m.l}" y1="${y}" x2="${W-m.r}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    const lbl=canLog? sci(Math.pow(10,t)) : trim(t);
-    g+=`<text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${lbl}</text>`; });
-  xticks.forEach(t=>{ const x=X(t); g+=`<line x1="${x}" y1="${m.t}" x2="${x}" y2="${H-m.b}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
-    g+=`<text x="${x}" y="${H-m.b+18}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${trim(t)}</text>`; });
+  // gridlines + ticks (categorical axes label each category)
+  const yt = yCat ? yCats.map((lab,i)=>({v:i,lab})) : niceTicks(ymin,ymax,5).map(t=>({v:t,lab:canLog?sci(Math.pow(10,t)):trim(t)}));
+  yt.forEach(t=>{ const y=Yraw(t.v); g+=`<line x1="${m.l}" y1="${y}" x2="${W-m.r}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    g+=`<text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${esc(String(t.lab))}</text>`; });
+  const xt = xCat ? xCats.map((lab,i)=>({v:i,lab})) : niceTicks(xmin,xmax,6).map(t=>({v:t,lab:trim(t)}));
+  xt.forEach(t=>{ const x=X(t.v); g+=`<line x1="${x}" y1="${m.t}" x2="${x}" y2="${H-m.b}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
+    g+=`<text x="${x}" y="${H-m.b+18}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${esc(String(t.lab))}</text>`; });
   // axis labels
   g+=`<text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(xm?xm.label:state.chart.x)}${xm&&xm.unit?` (${xm.unit})`:""}</text>`;
   g+=`<text transform="translate(16 ${m.t+(H-m.t-m.b)/2}) rotate(-90)" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(ym?ym.label:state.chart.y)}${ym&&ym.unit?` (${ym.unit})`:""}${canLog?" · log₁₀":""}</text>`;
-  // connect points within same series when X is monotonic-ish (helps linker trend lines)
-  const bySeries={}; pts.forEach(p=>{ (bySeries[seriesKey(p.c)] ||= []).push(p); });
-  Object.entries(bySeries).forEach(([k,arr])=>{ if(arr.length<2) return; const col=seriesColorVar(arr[0].c);
-    const sorted=[...arr].sort((a,b)=>a.x-b.x);
-    const dstr=sorted.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`).join(" ");
-    g+=`<path d="${dstr}" fill="none" stroke="var(${col})" stroke-width="1.6" opacity="0.4" stroke-dasharray="4 3"/>`; });
-  // points
-  pts.forEach((p,i)=>{ const col=seriesColorVar(p.c); const cx=X(p.x),cy=Y(p.y);
+  // connect points within same series (only when both axes are numeric)
+  if(!xCat&&!yCat){ const bySeries={}; pts.forEach(p=>{ (bySeries[seriesKey(p.c)] ||= []).push(p); });
+    Object.entries(bySeries).forEach(([k,arr])=>{ if(arr.length<2) return; const col=seriesColorVar(arr[0].c);
+      const sorted=[...arr].sort((a,b)=>a.x-b.x);
+      const dstr=sorted.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)} ${Yp(p.y).toFixed(1)}`).join(" ");
+      g+=`<path d="${dstr}" fill="none" stroke="var(${col})" stroke-width="1.6" opacity="0.4" stroke-dasharray="4 3"/>`; }); }
+  // points (jitter along a categorical axis so stacked buckets don't overlap)
+  pts.forEach((p,i)=>{ const col=seriesColorVar(p.c);
+    const cx=X(p.x)+(xCat?((i%5)-2)*3:0), cy=Yp(p.y)+(yCat?((i%5)-2)*3:0);
     g+=`<circle data-i="${i}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="var(${col})" stroke="var(--stage)" stroke-width="1.6"/>`;
     if(pts.length<=16) g+=`<text x="${cx}" y="${cy-9}" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="var(--f-mono)">${esc(p.c.id)}</text>`; });
   svg.innerHTML=g;
   // legend
   const groups=[...new Set(pts.map(p=>seriesKey(p.c)))];
   $("#chartLegend").innerHTML=groups.map(k=>{ const ex=pts.find(p=>seriesKey(p.c)===k); return `<span><i style="background:var(${seriesColorVar(ex.c)})"></i>${esc(k)}</span>`; }).join("");
-  // correlation note
-  const r=pearson(pts.map(p=>p.x),pts.map(p=>yAcc(p.y)));
-  $("#chartNote").innerHTML = pts.length>2 ? `Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog?" (log Y)":""}. ${trendText(state.chart.x,state.chart.y,r,pts)}` : `${pts.length} compound(s) plotted.`;
+  // note
+  if(!xCat&&!yCat&&pts.length>2){ const r=pearson(pts.map(p=>p.x),pts.map(p=>yAcc(p.y)));
+    $("#chartNote").innerHTML=`Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog?" (log Y)":""}. ${trendText(state.chart.x,state.chart.y,r,pts.map(p=>({c:p.c,x:p.x,y:p.y})))}`; }
+  else $("#chartNote").innerHTML=`${pts.length} compound(s) plotted${(xCat||yCat)?" · categorical axis (points jittered)":""}.`;
   // hover
   const tip=$("#tip"); const wrap=$("#chartWrap");
   svg.querySelectorAll("circle[data-i]").forEach(el=>{
     el.style.cursor="pointer";
     el.onmouseenter=()=>{ const p=pts[+el.dataset.i]; const bb=wrap.getBoundingClientRect(); const sb=svg.getBoundingClientRect();
       const sx=sb.width/W, sy=sb.height/H; const px=(+el.getAttribute("cx"))*sx+(sb.left-bb.left), py=(+el.getAttribute("cy"))*sy+(sb.top-bb.top);
-      tip.innerHTML=`<b>${esc(p.c.id)}</b><div class="trow">${esc(xm?xm.label:"x")}<span>${fmtNum(p.x,2)}</span></div><div class="trow">${esc(ym?ym.label:"y")}<span>${fmtNum(p.y,2)}</span></div><div class="trow">E3<span>${esc(p.c.e3?p.c.e3.ligase:(p.c.isGlue?"glue":"—"))}</span></div>`;
+      const fx=xCat?esc(String(p.rx)):fmtNum(p.rx,2), fy=yCat?esc(String(p.ry)):fmtNum(p.ry,2);
+      tip.innerHTML=`<b>${esc(p.c.id)}</b><div class="trow">${esc(xm?xm.label:"x")}<span>${fx}</span></div><div class="trow">${esc(ym?ym.label:"y")}<span>${fy}</span></div><div class="trow">E3<span>${esc(p.c.e3?p.c.e3.ligase:(p.c.isGlue?"glue":"—"))}</span></div>`;
       tip.style.opacity=1; tip.style.left=Math.min(bb.width-140,px+12)+"px"; tip.style.top=Math.max(0,py-10)+"px"; el.setAttribute("r","8"); };
     el.onmouseleave=()=>{ tip.style.opacity=0; el.setAttribute("r","6"); };
     el.onclick=()=>{ const p=pts[+el.dataset.i]; select(p.c.id); switchTab("compound"); };
@@ -939,11 +972,12 @@ function trendText(xKey,yKey,r,pts){
 }
 
 /* ---- table ---- */
-function tableColumns(){
-  return [ {k:"id",l:"ID",t:"t"},{k:"series",l:"Series",t:"t"},{k:"e3",l:"E3",t:"t"},
-    {k:"mw",l:"MW",t:"n"},{k:"clogp",l:"cLogP",t:"n"},{k:"tpsa",l:"TPSA",t:"n"},
-    {k:"hbd",l:"HBD",t:"n"},{k:"hba",l:"HBA",t:"n"},{k:"rot",l:"Rot",t:"n"},
-    {k:"linker_len",l:"Linker",t:"n"},{k:"dc50_nm",l:"DC₅₀ nM",t:"p"},{k:"dmax_pct",l:"Dmax %",t:"n"},{k:"target_ic50_nm",l:"IC₅₀ nM",t:"n"} ];
+function tableColumns(){ // structural columns are fixed; assay columns come from the loaded data
+  const cols=[ {k:"id",l:"ID",t:"t"},{k:"series",l:"Series",t:"t"},{k:"e3",l:"E3",t:"t"},
+    {k:"mw",l:"MW",t:"n"},{k:"clogp",l:"cLogP",t:"n"},{k:"linker_len",l:"Linker",t:"n"} ];
+  assayKeys().forEach(k=>{ const m=labelMeta(k), num=keyIsNumeric(k);
+    cols.push({k, l:m.label+(m.unit?` ${m.unit}`:""), t: num ? (/(^|_)(dc50|ic50|ec50|ki|kd|gi50)/.test(k)?"p":"n") : "c"}); });
+  return cols;
 }
 function cellVal(c,k){ if(k==="id")return c.id; if(k==="series")return c.series||""; if(k==="e3")return c.e3?c.e3.ligase:(c.isGlue?"glue":"—");
   if(c.desc&&c.desc[k]!=null)return c.desc[k]; if(c.data&&c.data[k]!=null)return c.data[k]; return null; }
@@ -956,11 +990,12 @@ function renderTable(){
   tb.innerHTML=rows.map(c=>"<tr data-id='"+esc(c.id)+"' aria-selected='"+(c.id===state.selectedId)+"'>"+cols.map(col=>{
       let v=cellVal(c,col.k);
       if(col.t==="t") return `<td>${esc(v==null?"":v)}</td>`;
+      if(col.t==="c") return `<td>${v==null?"–":`<span class="bucket">${esc(String(v))}</span>`}</td>`;
       if(col.t==="p"){ return `<td class="num"><span class="pcell" style="background:${potencyColor(v)}">${v==null?"–":fmtNum(v)}</span></td>`; }
       return `<td class="num">${v==null?"–":fmtNum(v, (col.k==="clogp"||col.k==="fsp3"||col.k==="tpsa")?1:0)}</td>`;
     }).join("")+"</tr>").join("");
   tb.querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{ select(tr.dataset.id); switchTab("compound"); });
-  $("#tableNote").innerHTML=`${rows.length} rows. DC₅₀ cells shaded by potency (darker = more potent). Click a row to inspect.`;
+  $("#tableNote").innerHTML=`${rows.length} rows. Assay columns are built from the document; IC₅₀/DC₅₀-type cells are shaded by potency, qualitative potency shown as chips. Click a row to inspect.`;
 }
 function toCSV(){
   const cols=tableColumns(); const head=["id","name","smiles",...cols.filter(c=>c.k!=="id").map(c=>c.k)];
@@ -1002,7 +1037,9 @@ function parseCSV(text){
     const smiles = si>=0? (cells[si]||"").trim() : "";
     const data={};
     header.forEach((h,ci)=>{ if(ci===si||ci===ii) return; const raw=(cells[ci]||"").trim(); if(raw==="") return;
-      const num=parseFloat(raw.replace(/[,%]/g,"")); const key=normAssay(h); if(!isNaN(num)) data[key]=num; });
+      const key=normAssay(h); const cleaned=raw.replace(/,/g,""); const num=parseFloat(cleaned);
+      // a clean number (optionally with a unit) is numeric; anything else (+++, A, <10, "weak") is kept as a category
+      if(!isNaN(num) && /^[+-]?[0-9][0-9.]*\s*(nm|µm|um|pm|mm|%)?$/i.test(cleaned)) data[key]=num; else data[key]=raw; });
     rows.push({id:id||("CMPD-"+li),name:(ii>=0?cells[ii]:id)||("CMPD-"+li),series:"imported",smiles,data});
   }
   return rows;
@@ -1056,6 +1093,13 @@ function extractPatentRecords(text){
     const ki=seg.match(/\bki\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ki)data.ki_nm=conv(ki[1],ki[2]);
     const kd=seg.match(/\bkd\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(kd)data.kd_nm=conv(kd[1],kd[2]);
     const dmax=seg.match(/d\s*max[^0-9]{0,10}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
+    const gi=seg.match(/gi\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(gi)data.gi50_nm=conv(gi[1],gi[2]);
+    const inh=seg.match(/([0-9.]+)\s*%\s*(?:inhibition|inhib)/i); if(inh)data.pct_inhibition=parseFloat(inh[1]);
+    // qualitative / bucketed potency: (+++), "activity: ++", or a lone run of 2-4 plus signs
+    let bk=seg.match(/(?:activit(?:y|ies)|potenc(?:y|ies)|class|grade)\s*[:=]?\s*(\+{1,4}|[A-E])\b/i)
+        || seg.match(/\((\+{1,4})\)/)
+        || seg.match(/(?:^|[\s|])(\+{2,4})(?=[\s|),;]|$)/);
+    if(bk && !("dc50_nm" in data) && !("target_ic50_nm" in data)) data.potency=bk[1].toUpperCase();
     const smiles=findSmilesInText(seg);
     if(Object.keys(data).length||smiles) rows.push({id,name:id,series:"patent/paper",smiles,data}); });
   return rows; }
