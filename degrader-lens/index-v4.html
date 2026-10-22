@@ -47,6 +47,13 @@
 /* visually-hidden but still rendered — file inputs must NOT be display:none or iOS
    Safari refuses to open the picker (both via a wrapping label and via .click()). */
 .vh{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* A visible native file input is the most reliable upload control on mobile
+   (iOS Safari + Android Chrome + the in-app webview) — no hidden element, no
+   label indirection that a mobile browser can fail to forward to the picker. */
+.fileinput{font:500 13px var(--f-body);color:var(--muted);max-width:100%}
+.fileinput::file-selector-button{font:500 13px var(--f-body);background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);border-radius:7px;padding:7px 12px;margin-right:10px;cursor:pointer}
+.fileinput::-webkit-file-upload-button{font:500 13px var(--f-body);background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);border-radius:7px;padding:7px 12px;margin-right:10px;cursor:pointer}
+.fileinput.small::file-selector-button,.fileinput.small::-webkit-file-upload-button{padding:5px 10px;font-size:12px;background:var(--panel);color:var(--ink);border-color:var(--line)}
 html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden}
 *{box-sizing:border-box}
@@ -313,7 +320,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <section class="block">
           <p class="help"><b>Upload a patent or paper PDF.</b> In seconds you get the <b>biology SAR</b> — compound numbers and reported <b>IC<sub>50</sub> / DC<sub>50</sub> / K<sub>i</sub> / D<sub>max</sub></b> — plus any machine-readable <b>SMILES</b> in tables or the SI (validated with RDKit). Reading <b>drawn</b> structures with Claude is a separate, optional step (tick below) that runs in the background and can be slow on a big patent — the SAR is ready without it.</p>
           <div class="inline" style="margin-top:9px">
-            <label class="btn primary" style="cursor:pointer">Upload PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" class="vh"></label>
+            <input type="file" id="pdfIn" accept="application/pdf,.pdf" class="fileinput" aria-label="Upload a patent or paper PDF">
             <span class="help">→ SAR + text SMILES, fast.</span>
           </div>
           <div class="inline" id="pdfVisionWrap" hidden style="margin-top:8px;gap:10px">
@@ -370,7 +377,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             <textarea id="pasteArea" spellcheck="false" placeholder="id,smiles,dc50_nm,dmax_pct&#10;CMPD-1,O=C(c1ccccc1)Nc1ccc(OCCNc2cccc3c2C(=O)N(C2CCC(=O)NC2=O)C3=O)cc1,120,74"></textarea>
           </div>
           <div class="inline">
-            <label class="btn small" style="cursor:pointer">Upload CSV / Excel / SDF…<input type="file" id="fileIn" accept=".csv,.tsv,.smi,.txt,.sdf,.mol,.xlsx,.xls" class="vh"></label>
+            <input type="file" id="fileIn" accept=".csv,.tsv,.smi,.txt,.sdf,.mol,.xlsx,.xls" class="fileinput small" aria-label="Upload CSV, Excel or SDF">
             <button class="btn small" id="loadSample">Load sample set</button>
           </div>
         </section>
