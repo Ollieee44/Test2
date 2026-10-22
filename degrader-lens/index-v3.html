@@ -1,0 +1,1373 @@
+<meta charset="utf-8">
+<title>Degrader Lens v2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Extract, decompose and visualise heterobifunctional degraders and molecular glues alongside their biological SAR.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen instrument. Left = compound gallery with search/filter; right = tabbed
+   inspector (Compound · SAR · Table · Data). Stacks to one column on phones. */
+:root{
+  --bg:#eceef2; --panel:#ffffff; --panel-2:#f3f5f9; --ink:#141a22; --muted:#5a6675; --line:#d7dde6;
+  --accent:#5a3ff0; --accent-ink:#ffffff; --accent-soft:#ece7fe; --stage:#fbfcfe;
+  --ok:#1f7a4d; --warn:#9a5b00; --bad:#b4232c;
+  /* degrader region colours (also mirrored in JS REGION) */
+  --reg-war:#0e9e8c; --reg-lnk:#dd8318; --reg-e3:#7c5cff;
+  --reg-war-soft:#d8f3ef; --reg-lnk-soft:#fbecd6; --reg-e3-soft:#ece7fe;
+  /* categorical series (dataviz light steps: blue / orange / violet / aqua) */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#6250d6; --s4:#1baf7a; --s5:#e87ba4;
+  --struct-ink:#1a222c;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:9px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0c1016; --panel:#141b24; --panel-2:#1a222d; --ink:#e5ebf2; --muted:#8c9aab; --line:#27313d;
+  --accent:#9a84ff; --accent-ink:#120a2e; --accent-soft:#241a46; --stage:#0a0e13;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178;
+  --reg-war:#2fd0bc; --reg-lnk:#f0a44a; --reg-e3:#a78bff;
+  --reg-war-soft:#0f322e; --reg-lnk-soft:#33260f; --reg-e3-soft:#211a3e;
+  --s1:#3987e5; --s2:#eb6834; --s3:#9085e9; --s4:#199e70; --s5:#d55181;
+  --struct-ink:#e5ebf2;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0c1016; --panel:#141b24; --panel-2:#1a222d; --ink:#e5ebf2; --muted:#8c9aab; --line:#27313d;
+  --accent:#9a84ff; --accent-ink:#120a2e; --accent-soft:#241a46; --stage:#0a0e13;
+  --ok:#4fc28a; --warn:#e3a547; --bad:#f07178;
+  --reg-war:#2fd0bc; --reg-lnk:#f0a44a; --reg-e3:#a78bff;
+  --reg-war-soft:#0f322e; --reg-lnk-soft:#33260f; --reg-e3-soft:#211a3e;
+  --s1:#3987e5; --s2:#eb6834; --s3:#9085e9; --s4:#199e70; --s5:#d55181;
+  --struct-ink:#e5ebf2;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{text-wrap:balance}
+.tnum{font-variant-numeric:tabular-nums}
+
+.app{height:100%;display:grid;grid-template-rows:auto 1fr;
+  padding-left:max(12px,env(safe-area-inset-left,0px));
+  padding-right:max(12px,env(safe-area-inset-right,0px));
+  padding-block:10px;gap:10px}
+
+header{display:flex;align-items:center;gap:12px 14px;flex-wrap:wrap;min-width:0}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto;min-width:0}
+.brand h1{font:700 22px/1 var(--f-display);letter-spacing:-.015em;margin:0;white-space:nowrap}
+.brand span{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hstat{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+.hstat b{color:var(--ink);font-weight:600}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:6px 11px;font-weight:500;font-size:13px;line-height:1.2;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:3px 8px;font-size:12px}
+.btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+
+.grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(360px,1.25fr);gap:10px;min-height:0}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* ---- gallery ---- */
+.gtools{padding:10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.search{display:flex;gap:6px}
+.search input{flex:1;min-width:0;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:7px 9px;font:12.5px var(--f-mono)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted)}
+.chip[aria-pressed="true"]{color:var(--ink);border-color:var(--accent);background:var(--accent-soft)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);align-items:center}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:4px;vertical-align:-1px}
+.gscroll{overflow:auto;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;align-content:start}
+.card{border:1px solid var(--line);border-radius:8px;background:var(--stage);padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-width:0}
+.card:hover{border-color:var(--muted)}
+.card[aria-selected="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.bad{opacity:.6}
+.card .depict{height:112px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.card .depict svg{max-width:100%;max-height:100%;height:auto}
+.card .cid{font:600 12.5px var(--f-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .crow{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.badge{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:5px;letter-spacing:.02em;white-space:nowrap}
+.badge.crbn{background:color-mix(in srgb,var(--s1) 18%,transparent);color:var(--s1)}
+.badge.vhl{background:color-mix(in srgb,var(--s2) 20%,transparent);color:var(--s2)}
+.badge.mdm2{background:color-mix(in srgb,var(--s3) 20%,transparent);color:var(--s3)}
+.badge.dcaf15{background:color-mix(in srgb,var(--s4) 20%,transparent);color:var(--s4)}
+.badge.none{background:var(--panel-2);color:var(--muted)}
+.potency{font:600 11px var(--f-mono);padding:1px 6px;border-radius:5px;background:var(--panel-2)}
+
+/* ---- inspector ---- */
+.tabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{border:1px solid transparent;border-bottom:none;background:transparent;border-radius:7px 7px 0 0;padding:7px 13px;font-weight:500;font-size:13px;color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--panel-2);border-color:var(--line)}
+.pane{overflow:auto;padding:14px;min-height:0;flex:1}
+.pane h2{font:600 15px var(--f-display);margin:0 0 2px}
+.pane .sub{color:var(--muted);font-size:12px;margin:0 0 12px}
+section.block{margin-bottom:16px}
+section.block>h3{font:600 11px var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+
+.detailtop{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;align-items:start}
+.bigdepict{background:var(--stage);border:1px solid var(--line);border-radius:8px;padding:8px;min-height:220px;display:flex;align-items:center;justify-content:center}
+.bigdepict svg{max-width:100%;height:auto}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-weight:500}
+.decomp{display:flex;flex-direction:column;gap:7px}
+.region{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+.region .swatch{width:12px;height:12px;border-radius:3px;flex:none}
+.region .rname{font-weight:600;font-size:12.5px}
+.region .rmeta{color:var(--muted);font-size:11.5px}
+.props{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.prop{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+.prop .pl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.prop .pv{font:600 15px var(--f-mono)}
+.prop .pv small{font-size:10px;color:var(--muted);font-weight:500}
+.prop.flag .pv{color:var(--warn)}
+.bio{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.bio .prop .pv{color:var(--accent)}
+
+.hl-ctrl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.hl-ctrl input{flex:1;min-width:120px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 8px;font:12px var(--f-mono)}
+
+/* ---- chart ---- */
+.chart-ctrls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.field select{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 8px;font-size:12.5px}
+.chartwrap{position:relative;border:1px solid var(--line);border-radius:8px;background:var(--stage);padding:6px}
+.chartwrap svg{display:block;width:100%;height:auto}
+.chart-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:8px;color:var(--ink)}
+.chart-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px}
+.note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,.18);min-width:120px;z-index:5;transition:opacity .08s}
+.tip b{font:600 12.5px var(--f-mono)}
+.tip .trow{color:var(--muted);display:flex;justify-content:space-between;gap:14px}
+.tip .trow span{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ---- table ---- */
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--panel-2);cursor:pointer;font-weight:600;user-select:none;z-index:1}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--panel)}
+th:first-child{z-index:2}
+th:nth-child(2),td:nth-child(2){text-align:left}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--panel-2)}
+tbody tr[aria-selected="true"] td{background:var(--accent-soft)}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.pcell{border-radius:5px;padding:1px 7px;font-family:var(--f-mono);font-weight:600}
+
+/* ---- data tab ---- */
+.datarow{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+.datarow textarea{width:100%;min-height:92px;border:1px solid var(--line);background:var(--panel-2);border-radius:8px;padding:9px;font:12px/1.5 var(--f-mono);resize:vertical}
+.inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.inline input[type=text]{flex:1;min-width:160px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 9px;font:12px var(--f-mono)}
+.status{font-size:12px;border-radius:7px;padding:8px 10px;line-height:1.5}
+.status.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);color:var(--ok)}
+.status.err{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
+.help{font-size:12px;color:var(--muted);line-height:1.55}
+.help code{font-family:var(--f-mono);background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+#progress{border:1px solid var(--accent);border-radius:10px;padding:12px 14px;background:var(--accent-soft);margin-bottom:14px}
+.prog-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13.5px;font-weight:600;margin-bottom:9px}
+.prog-head #progTime{color:var(--muted);font-weight:500;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.prog-bar{height:8px;border-radius:999px;background:color-mix(in srgb,var(--accent) 22%,transparent);overflow:hidden;position:relative}
+#progFill{height:100%;width:0%;background:var(--accent);border-radius:999px;transition:width .45s ease}
+#progFill.indet{position:absolute;width:38%;animation:indet 1.15s ease-in-out infinite}
+@keyframes indet{0%{left:-40%}100%{left:100%}}
+.prog-sub{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){#progFill.indet{animation:none;left:0;width:100%;opacity:.5}}
+.dropzone{border:1.5px dashed var(--line);border-radius:8px;padding:16px;text-align:center;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--panel-2)}
+.dropzone:hover,.dropzone.drag{border-color:var(--accent);color:var(--ink)}
+.dropzone u{color:var(--accent)}
+.dropzone img{max-height:120px;max-width:100%;border-radius:6px;margin-top:6px}
+.review-src{max-height:170px;max-width:100%;border:1px solid var(--line);border-radius:8px;margin:10px 0}
+.rev{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px}
+.rev .revdep{height:92px;display:flex;align-items:center;justify-content:center;background:var(--stage);border-radius:6px;overflow:hidden}
+.rev .revdep svg{max-width:100%;max-height:100%}
+.rev .revbody{min-width:0}
+.rev input{border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:5px 7px;font:11.5px var(--f-mono);width:100%}
+.rev .revid{margin-bottom:5px}
+.rev .revact{display:flex;flex-direction:column;gap:5px}
+@media (max-width:520px){.rev{grid-template-columns:1fr}}
+
+.boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;flex-direction:column;gap:14px;text-align:center;padding:24px}
+.boot h1{font:700 26px var(--f-display);margin:0;letter-spacing:-.02em}
+.boot p{color:var(--muted);margin:0;max-width:30ch}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.empty{color:var(--muted);font-size:13px;padding:30px 10px;text-align:center;line-height:1.6}
+
+@media (max-width:860px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%;grid-template-rows:auto auto auto}
+  .grid{grid-template-columns:1fr}
+  .col{min-height:0}
+  .gscroll{max-height:none}
+  .detailtop{grid-template-columns:1fr}
+}
+</style>
+
+<div class="boot" id="boot">
+  <div class="spin" aria-hidden="true"></div>
+  <h1>Degrader Lens</h1>
+  <p id="bootmsg">Loading the chemistry engine…</p>
+</div>
+
+<div class="app" id="app" hidden>
+  <header>
+    <div class="brand">
+      <h1>Degrader Lens</h1>
+      <span id="tagline">patents &amp; papers → degrader structures + SAR</span>
+    </div>
+    <div class="hstat"><span><b id="nValid">0</b> compounds</span><span id="nBad"></span></div>
+    <button class="btn small" id="btnTheme" title="Toggle light / dark">Theme</button>
+  </header>
+
+  <div class="grid">
+    <!-- GALLERY -->
+    <div class="col">
+      <div class="gtools">
+        <div class="search">
+          <input id="q" placeholder="SMARTS or text filter (e.g. c1ccccc1, VHL, DL-C4)" autocomplete="off" spellcheck="false">
+          <button class="btn small" id="qClear">Clear</button>
+        </div>
+        <div class="chips" id="e3chips"></div>
+        <div class="legend">
+          <span><i style="background:var(--reg-war)"></i>Warhead / target ligand</span>
+          <span><i style="background:var(--reg-lnk)"></i>Linker</span>
+          <span><i style="background:var(--reg-e3)"></i>E3 ligand</span>
+        </div>
+      </div>
+      <div class="gscroll" id="gallery"></div>
+    </div>
+
+    <!-- INSPECTOR -->
+    <div class="col">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="compound" aria-selected="true">Compound</button>
+        <button class="tab" role="tab" data-tab="sar">SAR</button>
+        <button class="tab" role="tab" data-tab="table">Table</button>
+        <button class="tab" role="tab" data-tab="data">Data</button>
+      </div>
+
+      <div class="pane" id="pane-compound" role="tabpanel"></div>
+
+      <div class="pane" id="pane-sar" role="tabpanel" hidden>
+        <h2>Structure–activity landscape</h2>
+        <p class="sub">Plot any measured or computed property against another. Degradation potency (DC<sub>50</sub>) is best read on a log axis.</p>
+        <div class="chart-ctrls" id="chartCtrls"></div>
+        <div class="chartwrap" id="chartWrap"><svg id="chart" viewBox="0 0 640 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="SAR scatter plot"></svg><div class="tip" id="tip" style="opacity:0"></div></div>
+        <div class="chart-legend" id="chartLegend"></div>
+        <div class="note" id="chartNote"></div>
+      </div>
+
+      <div class="pane" id="pane-table" role="tabpanel" hidden>
+        <div class="inline" style="margin-bottom:10px">
+          <h2 style="margin-right:auto">Data table</h2>
+          <button class="btn small" id="copyCsv">Copy CSV</button>
+          <button class="btn small" id="copySmi">Copy SMILES</button>
+        </div>
+        <div class="tablewrap"><table id="dataTable"><thead></thead><tbody></tbody></table></div>
+        <div class="note" id="tableNote"></div>
+      </div>
+
+      <div class="pane" id="pane-data" role="tabpanel">
+        <h2>Drop in a patent or paper</h2>
+        <p class="sub">Structures and data come out together — read in your browser (RDKit WebAssembly). Nothing is uploaded.</p>
+
+        <div id="progress" hidden>
+          <div class="prog-head"><span id="progStage">Working…</span><span id="progTime"></span></div>
+          <div class="prog-bar"><div id="progFill"></div></div>
+          <div class="prog-sub"><span id="progDetail"></span><button class="btn small" id="progStop" hidden>Stop</button></div>
+        </div>
+
+        <div id="poiBanner" hidden style="margin-bottom:12px"></div>
+
+        <section class="block">
+          <p class="help"><b>Upload a patent or paper PDF</b> and the tool reads it for <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / K<sub>i</sub> / D<sub>max</sub></b>, and any machine-readable <b>SMILES</b> in tables or the SI (each validated with RDKit). With <b>“read drawn structures too”</b> ticked, it first finds the pages that hold the <b>numbered compound structures</b> (usually the tables toward the end), skips the rest, has Claude read those drawings, and <b>merges every structure onto its compound by number</b>.</p>
+          <div class="inline" style="margin-top:9px">
+            <label class="btn primary" style="cursor:pointer">Upload PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
+            <label id="pdfVisionWrap" hidden style="gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision" checked> read drawn structures too (Claude)</label>
+          </div>
+          <div class="inline" style="margin-top:7px">
+            <label class="help" for="pdfRange" style="white-space:nowrap">Limit to pages (optional)</label>
+            <input type="text" id="pdfRange" placeholder="e.g. 80-140 or last 30" spellcheck="false" style="max-width:210px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:5px 8px;font:12px var(--f-mono)">
+            <label id="keepUnnumWrap" style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="keepUnnum"> keep unnumbered structures (intermediates)</label>
+          </div>
+          <div class="datarow" style="margin-top:10px">
+            <p class="help" style="margin:0">…or paste a text excerpt from a patent:</p>
+            <textarea id="patentArea" spellcheck="false" placeholder="Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
+            <div class="inline"><button class="btn small primary" id="patentBtn">Extract from pasted text</button></div>
+          </div>
+        </section>
+
+        <section class="block" id="claudeSec">
+          <h3>Read a single drawing with Claude</h3>
+          <p class="help" id="claudeNote">Checking whether Claude vision is available here…</p>
+          <div id="claudeTools" hidden>
+            <p class="help" style="margin-bottom:7px">The PDF upload above reads drawings automatically. Use this to read one snipped structure, or re-read a single page, and <b>check it before adding</b> — vision OCSR is a strong assist, not guaranteed correct on complex degraders.</p>
+            <div class="dropzone" id="claudeDrop" tabindex="0">Drop or paste a structure image, or <u>choose a file</u>.<input type="file" id="claudeImgIn" accept="image/*" hidden></div>
+            <div class="inline" style="margin-top:7px">
+              <button class="btn small primary" id="claudeReadImg" disabled>Read image with Claude</button>
+              <span id="pdfPageWrap" hidden class="inline" style="gap:5px">
+                <span class="help">or render page</span>
+                <input type="number" id="pdfPageNo" min="1" value="1" style="width:60px;border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:4px 6px;font:12px var(--f-mono)">
+                <span class="help" id="pdfPageOf"></span>
+                <button class="btn small" id="claudeReadPage">Read PDF page</button>
+              </span>
+              <span id="claudeStatus" class="help"></span>
+            </div>
+            <div id="claudeReview"></div>
+          </div>
+        </section>
+
+        <section class="block">
+          <h3>Paste or upload a dataset</h3>
+          <div class="datarow">
+            <div class="inline">
+              <div class="field"><label for="fmt">Format</label>
+                <select id="fmt">
+                  <option value="csv">CSV (id, smiles, assay columns…)</option>
+                  <option value="smiles">SMILES list (one per line)</option>
+                  <option value="sdf">SDF / MOL block</option>
+                </select>
+              </div>
+              <button class="btn small primary" id="parseBtn">Parse &amp; add</button>
+              <button class="btn small" id="replaceBtn">Replace all</button>
+            </div>
+            <textarea id="pasteArea" spellcheck="false" placeholder="id,smiles,dc50_nm,dmax_pct&#10;CMPD-1,O=C(c1ccccc1)Nc1ccc(OCCNc2cccc3c2C(=O)N(C2CCC(=O)NC2=O)C3=O)cc1,120,74"></textarea>
+          </div>
+          <div class="inline">
+            <label class="btn small" style="cursor:pointer">Upload CSV / Excel / SDF…<input type="file" id="fileIn" accept=".csv,.tsv,.smi,.txt,.sdf,.mol,.xlsx,.xls" hidden></label>
+            <button class="btn small" id="loadSample">Load sample set</button>
+          </div>
+        </section>
+
+        <section class="block">
+          <h3>Advanced</h3>
+          <p class="help"><b>Warhead / target-ligand scaffold.</b> A SMARTS pattern for the common target-binding scaffold splits each degrader into <b>warhead · linker · E3 ligand</b> exactly for region-based SAR. The E3 ligand is always detected automatically.</p>
+          <div class="inline" style="margin-top:7px">
+            <input type="text" id="warheadIn" placeholder="e.g. O=C(c1ccccc1)Nc1ccccc1" spellcheck="false">
+            <button class="btn small primary" id="applyWarhead">Apply</button>
+            <button class="btn small" id="clearWarhead">Auto-estimate only</button>
+          </div>
+          <p class="help" style="margin-top:10px"><b>Self-hosted OCSR backend (optional).</b> Point uploads at a <code>server/app.py</code> instance for full server-side OCSR (needs the page self-hosted — the claude.ai artifact blocks outbound requests). A local <code>tools/patent_to_csv.py</code> companion can also write a CSV to load above.</p>
+          <div class="inline" style="margin-top:7px">
+            <input type="text" id="ocsrUrl" placeholder="OCSR server URL, e.g. http://localhost:8000" spellcheck="false">
+            <label style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="ocsrOn"> run OCSR on the server</label>
+          </div>
+        </section>
+
+        <div id="dataStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.js"></script>
+<script src="./pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+"use strict";
+/* ============================ constants & sample set ============================ */
+const REGION = { war:{key:"war",label:"Warhead / target ligand",rgb:[0.055,0.62,0.55]},
+                 lnk:{key:"lnk",label:"Linker",rgb:[0.87,0.51,0.09]},
+                 e3 :{key:"e3", label:"E3 ligand",rgb:[0.49,0.36,1.0]} };
+
+// E3-ligase ligand anchors — SMARTS validated against reference ligands with RDKit.
+const E3_ANCHORS = [
+  { ligase:"CRBN",   name:"Glutarimide",          smarts:"O=C1CCCC(=O)N1",      note:"cereblon recruiter (thalidomide / lenalidomide / pomalidomide class)" },
+  { ligase:"VHL",    name:"Hydroxyprolinamide",   smarts:"OC1CC(NC1)C(=O)N",    note:"VHL recruiter (VH032 / VHL-1 class)" },
+  { ligase:"MDM2",   name:"Nutlin imidazoline",   smarts:"C1(c2ccccc2)N=C(c2ccccc2)N(C(=O)N)C1c1ccccc1", note:"MDM2 recruiter (nutlin class)" },
+  { ligase:"DCAF15", name:"Arylsulfonamide",      smarts:"O=S(=O)(N)c1ccccc1",  note:"DCAF15 recruiter (indisulam / sulfonamide glue class)" },
+];
+const DEFAULT_WARHEAD = "O=C(c1ccccc1)Nc1ccccc1"; // benzanilide warhead of the sample series
+
+const SAMPLE = [
+  ["DL-C1","Warhead–PEG1–pomalidomide","CRBN PEG series",520,66,34,"O=C1CCC(N2C(=O)c3cccc(NCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C2","Warhead–PEG2–pomalidomide","CRBN PEG series",110,72,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C3","Warhead–PEG3–pomalidomide","CRBN PEG series",18,78,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C4","Warhead–PEG4–pomalidomide","CRBN PEG series",6,84,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C5","Warhead–PEG5–pomalidomide","CRBN PEG series",25,90,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-C6","Warhead–PEG6–pomalidomide","CRBN PEG series",140,96,34,"O=C1CCC(N2C(=O)c3cccc(NCCOCCOCCOCCOCCOCCOc4ccc(NC(=O)c5ccccc5)cc4)c3C2=O)C(=O)N1"],
+  ["DL-V2","Warhead–PEG2–VH032","VHL PEG series",240,69,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V3","Warhead–PEG3–VH032","VHL PEG series",41,76,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V4","Warhead–PEG4–VH032","VHL PEG series",9,83,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V5","Warhead–PEG5–VH032","VHL PEG series",15,90,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["DL-V6","Warhead–PEG6–VH032","VHL PEG series",88,95,34,"Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)C(NC(=O)CCOCCOCCOCCOCCOCCOc2ccc(NC(=O)c3ccccc3)cc2)C(C)(C)C)cc1"],
+  ["MG-1","Lenalidomide (CRBN glue)","Molecular glue",null,null,null,"Nc1cccc2c1C(=O)N(C1CCC(=O)NC1=O)C2"],
+  ["MG-2","Pomalidomide (CRBN glue)","Molecular glue",null,null,null,"Nc1cccc2c1C(=O)N(C1CCC(=O)NC1=O)C2=O"],
+  ["MG-3","Indisulam-like (DCAF15 glue)","Molecular glue",null,null,null,"Nc1ccc2cc(S(=O)(=O)Nc3cccc(Cl)c3)ccc2c1"],
+];
+function sampleRows(){
+  return SAMPLE.map(r=>({ id:r[0], name:r[1], series:r[2], smiles:r[6],
+    data:{ dc50_nm:r[3], dmax_pct:r[4], target_ic50_nm:r[5] } }));
+}
+
+/* field metadata for descriptors + known assays (label, unit, log-friendly) */
+const DESCRIPTOR_FIELDS = [
+  ["mw","MW","Da",false],["clogp","cLogP","",false],["tpsa","TPSA","Å²",false],
+  ["hbd","HBD","",false],["hba","HBA","",false],["rot","Rot. bonds","",false],
+  ["rings","Rings","",false],["fsp3","Fsp³","",false],["heavy","Heavy atoms","",false],
+  ["linker_len","Linker length","atoms",false],["linker_peg_o","Linker ethers","O",false],
+];
+const ASSAY_LABELS = { dc50_nm:["DC₅₀","nM",true], dmax_pct:["Dmax","%",false],
+  target_ic50_nm:["Target IC₅₀","nM",true], ec50_nm:["EC₅₀","nM",true],
+  ki_nm:["Ki","nM",true], kd_nm:["Kd","nM",true], ternary_kd_nm:["Ternary Kd","nM",true] };
+
+/* ============================ state ============================ */
+const state = {
+  rdkit:null, qmolAnchors:[], warheadSmarts:DEFAULT_WARHEAD, warheadQmol:null,
+  compounds:[], selectedId:null, tab:"compound",
+  filterE3:new Set(), query:"",
+  sort:{key:"id",dir:1}, hlSmarts:"",
+  chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
+  sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
+  keepUnnumbered:false, detectedTargets:[], filterReview:false,
+};
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
+              set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+
+/* ============================ RDKit helpers ============================ */
+function withMol(smiles,fn){
+  const m=state.rdkit.get_mol(smiles);
+  try{ if(!m||!m.is_valid()) return null; return fn(m); }
+  finally{ if(m) m.delete(); }
+}
+function structInkHex(){ return getComputedStyle(document.documentElement).getPropertyValue('--struct-ink').trim()||'#1a222c'; }
+
+// Parse a V2000 molblock into graph (elements, bonds, ring atoms via bridge detection).
+function parseGraph(molblock){
+  const lines=molblock.split("\n");
+  const counts=lines[3];
+  const na=parseInt(counts.slice(0,3),10), nb=parseInt(counts.slice(3,6),10);
+  const el=[]; for(let i=0;i<na;i++){ el.push(lines[4+i].slice(31,34).trim()); }
+  const adj=Array.from({length:na},()=>[]); const bonds=[];
+  for(let i=0;i<nb;i++){ const L=lines[4+na+i];
+    const a=parseInt(L.slice(0,3),10)-1, b=parseInt(L.slice(3,6),10)-1;
+    adj[a].push(b); adj[b].push(a); bonds.push([a,b]); }
+  // bridge detection (iterative DFS) -> ring atoms = incident to any non-bridge bond
+  const disc=new Array(na).fill(-1), low=new Array(na).fill(0), ring=new Array(na).fill(false);
+  let t=0;
+  for(let s=0;s<na;s++){ if(disc[s]!==-1) continue;
+    const st=[[s,-1,0]];
+    while(st.length){ const fr=st[st.length-1]; const [u,parent,pi]=fr;
+      if(pi===0){ disc[u]=low[u]=t++; }
+      if(pi<adj[u].length){ fr[2]++; const v=adj[u][pi];
+        if(v===parent) continue;
+        if(disc[v]===-1){ st.push([v,u,0]); }
+        else { low[u]=Math.min(low[u],disc[v]); }
+      } else {
+        st.pop();
+        if(parent!==-1){ low[parent]=Math.min(low[parent],low[u]);
+          if(low[u]<=disc[parent]){ ring[u]=true; ring[parent]=true; } // non-bridge edge
+        }
+      }
+    }
+  }
+  return {na,el,adj,bonds,ring};
+}
+// multi-source BFS shortest path from any atom in A to any atom in B; returns full path (incl ends)
+function shortestPath(adj,setA,setB){
+  const prev=new Array(adj.length).fill(-2); const q=[];
+  for(const a of setA){ prev[a]=-1; q.push(a); }
+  const B=new Set(setB);
+  let hit=-1;
+  for(let h=0;h<q.length;h++){ const u=q[h];
+    if(B.has(u)){ hit=u; break; }
+    for(const v of adj[u]){ if(prev[v]===-2){ prev[v]=u; q.push(v); } }
+  }
+  if(hit===-1) return null;
+  const path=[]; let c=hit; while(c!==-1){ path.push(c); c=prev[c]; } return path.reverse();
+}
+
+// core per-compound analysis (creates a mol from canonical smiles, computes everything, frees it)
+// Scaffold-free decomposition: warhead = the ligand farthest from the E3 anchor across
+// an acyclic linker. Returns {warhead, linker, e3, pegO} or null (no linker -> glue).
+function autoDecompose(graph, anchor){
+  const {adj, ring, el, na}=graph;
+  const dist=new Array(na).fill(-1), par=new Array(na).fill(-1), q=[];
+  for(const a of anchor){ dist[a]=0; q.push(a); }
+  for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of adj[u]){ if(dist[v]<0){ dist[v]=dist[u]+1; par[v]=u; q.push(v); } } }
+  const anchorSet=new Set(anchor); let seed=-1, best=-1;
+  for(let i=0;i<na;i++){ if(ring[i] && !anchorSet.has(i) && dist[i]>best){ best=dist[i]; seed=i; } }
+  if(seed<0) return null;
+  const path=[]; let c=seed; while(c>=0){ path.push(c); c=par[c]; }
+  const interior=path.slice(1,-1).filter(a=>!ring[a]);
+  if(!interior.length) return null;
+  const linkSet=new Set(interior);
+  const e3=new Set([anchor[0]]); const st=[anchor[0]];
+  while(st.length){ const u=st.pop(); for(const v of adj[u]){ if(!linkSet.has(v) && !e3.has(v)){ e3.add(v); st.push(v); } } }
+  const warhead=[]; for(let i=0;i<na;i++){ if(!e3.has(i) && !linkSet.has(i)) warhead.push(i); }
+  return {warhead, linker:interior, e3:[...e3], pegO:interior.filter(a=>el[a]==="O").length};
+}
+function analyse(raw){
+  const rk=state.rdkit;
+  let probe=rk.get_mol(raw.smiles);
+  if(!probe||!probe.is_valid()){ if(probe)probe.delete();
+    return {...raw,valid:false,error:"SMILES could not be parsed"}; }
+  const canonical=probe.get_smiles(); probe.delete();
+  const m=rk.get_mol(canonical);
+  const out={...raw,valid:true,smiles:canonical,error:null};
+  try{
+    const d=JSON.parse(m.get_descriptors());
+    const pick=(...ks)=>{ for(const k of ks){ if(d[k]!=null) return d[k]; } return null; };
+    out.desc={
+      mw:round(pick("amw","exactmw"),1), clogp:round(pick("CrippenClogP"),2),
+      tpsa:round(pick("tpsa","TPSA"),1), hbd:pick("NumHBD","lipinskiHBD","NumHBA"),
+      hba:pick("NumHBA","lipinskiHBA"), rot:pick("NumRotatableBonds"),
+      rings:pick("NumRings"), fsp3:round(pick("FractionCSP3"),2), heavy:pick("NumHeavyAtoms"),
+    };
+    out.desc.hbd=pick("NumHBD","lipinskiHBD"); // ensure correct
+    const graph=parseGraph(m.get_molblock());
+    // E3 detection
+    out.e3=null; out.e3atoms=[];
+    for(let i=0;i<state.qmolAnchors.length;i++){ const q=state.qmolAnchors[i]; if(!q) continue;
+      const mt=JSON.parse(m.get_substruct_match(q));
+      if(mt&&mt.atoms&&mt.atoms.length){ out.e3=E3_ANCHORS[i]; out.e3atoms=mt.atoms; break; } }
+    // warhead + linker: exact from a user warhead scaffold if it matches, else automatic (scaffold-free)
+    out.waratoms=[]; out.lnkatoms=[]; out.desc.linker_len=null; out.desc.linker_peg_o=null; out.autoDecomp=false;
+    let e3region = out.e3atoms.slice();
+    if(out.e3atoms.length){
+      let warMatch=[];
+      if(state.warheadQmol){ const mt=JSON.parse(m.get_substruct_match(state.warheadQmol));
+        if(mt&&mt.atoms&&mt.atoms.length) warMatch=mt.atoms; }
+      if(warMatch.length){ // exact, scaffold-based
+        out.waratoms=warMatch;
+        const path=shortestPath(graph.adj,out.e3atoms,warMatch);
+        if(path){ const interior=path.slice(1,-1).filter(a=>!graph.ring[a]);
+          out.lnkatoms=interior; out.desc.linker_len=interior.length; out.desc.linker_peg_o=interior.filter(a=>graph.el[a]==="O").length; }
+      } else { // automatic, scaffold-free
+        const dc=autoDecompose(graph, out.e3atoms);
+        if(dc){ out.waratoms=dc.warhead; out.lnkatoms=dc.linker; e3region=dc.e3;
+          out.desc.linker_len=dc.linker.length; out.desc.linker_peg_o=dc.pegO; out.autoDecomp=true; }
+      }
+    }
+    // region atom map; linker is written last so the boundary atoms read as linker
+    const reg={}; out.waratoms.forEach(a=>reg[a]="war"); e3region.forEach(a=>reg[a]="e3"); out.lnkatoms.forEach(a=>reg[a]="lnk");
+    out.e3region=e3region; out.regionMap=reg;
+    out.isGlue = (out.e3 && out.lnkatoms.length===0 && out.waratoms.length===0);
+    out.na=graph.na;
+  }catch(e){ out.valid=false; out.error="Analysis failed: "+e.message; }
+  m.delete();
+  return out;
+}
+function round(v,n){ if(v==null||isNaN(v)) return null; const f=Math.pow(10,n); return Math.round(v*f)/f; }
+
+/* ============================ depiction ============================ */
+function depict(c,{w=250,h=180,regions=true,extraSmarts=""}={}){
+  return withMol(c.smiles,m=>{
+    const det={ width:w, height:h, bondLineWidth:1, backgroundColour:[1,1,1,0] };
+    const atoms=[], aCol={}, bonds=[], bCol={};
+    if(regions && c.regionMap){
+      for(const [a,r] of Object.entries(c.regionMap)){ const idx=+a; atoms.push(idx); aCol[idx]=REGION[r].rgb; }
+      // colour a bond if both ends share a region
+      try{ const g=parseGraph(m.get_molblock());
+        g.bonds.forEach(([x,y],bi)=>{ const rx=c.regionMap[x],ry=c.regionMap[y];
+          if(rx&&rx===ry){ bonds.push(bi); bCol[bi]=REGION[rx].rgb; } }); }catch(e){}
+    }
+    if(extraSmarts){ const q=state.rdkit.get_qmol(extraSmarts);
+      if(q&&q.is_valid()){ try{ const mt=JSON.parse(m.get_substruct_match(q));
+        (mt.atoms||[]).forEach(a=>{ atoms.push(a); aCol[a]=[0.95,0.85,0.2]; });
+        (mt.bonds||[]).forEach(b=>{ bonds.push(b); bCol[b]=[0.95,0.85,0.2]; }); }catch(e){} }
+      if(q) q.delete(); }
+    det.atoms=atoms; det.bonds=bonds; det.highlightAtomColors=aCol; det.highlightBondColors=bCol;
+    let svg=m.get_svg_with_highlights(JSON.stringify(det));
+    const ink=structInkHex();
+    // bonds/black text -> theme ink; the transparent background rect comes back as
+    // the 8-digit hex #FFFFFF00, so match an optional alpha and map white to none.
+    svg=svg.replace(/#000000/gi,ink).replace(/#FFFFFF([0-9A-Fa-f]{2})?/gi,"none");
+    return svg;
+  }) || `<div class="empty">no structure</div>`;
+}
+
+/* ============================ rendering ============================ */
+function ligaseClass(c){ return c.e3? c.e3.ligase.toLowerCase() : (c.isGlue?"none":"none"); }
+function e3Label(c){ return c.e3? c.e3.ligase : (c.valid?"—":"invalid"); }
+function potencyColor(v){ // sequential blue ramp on log DC50 (lower = more potent = darker)
+  if(v==null) return "transparent";
+  const lo=Math.log10(1), hi=Math.log10(1000);
+  let t=(Math.log10(Math.max(1,v))-lo)/(hi-lo); t=Math.min(1,Math.max(0,t));
+  const light=getTheme()==="dark";
+  // potent (t=0) strong accent -> weak (t=1) faint
+  const a=(1-t)*0.8+0.08;
+  return `color-mix(in srgb, var(--s1) ${Math.round(a*100)}%, transparent)`;
+}
+function fmtNum(v,dp=0){ return v==null?"–":(+v).toLocaleString(undefined,{maximumFractionDigits:dp}); }
+
+function visibleCompounds(){
+  const q=state.query.trim(); let qmol=null, qIsSmarts=false;
+  if(q){ const tryq=state.rdkit.get_qmol(q); if(tryq&&tryq.is_valid()&&tryq.get_num_atoms&&tryq.get_num_atoms()>0){ qmol=tryq; qIsSmarts=true; } else if(tryq){ tryq.delete(); } }
+  const out=state.compounds.filter(c=>{
+    if(c.dataOnly) return false; // gallery is structure-focused; data-only records live in the Table
+    if(state.filterReview && !c.needsReview) return false;
+    if(state.filterE3.size){ const key=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE"); if(!state.filterE3.has(key)) return false; }
+    if(!q) return true;
+    if(qIsSmarts && c.valid){ const hit=withMol(c.smiles,m=>{ const mt=JSON.parse(m.get_substruct_match(qmol)); return mt.atoms&&mt.atoms.length; }); if(hit) return true; }
+    const hay=(c.id+" "+c.name+" "+c.series+" "+(c.e3?c.e3.ligase:"")).toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
+  if(qmol) qmol.delete();
+  return out;
+}
+
+function renderGallery(){
+  const g=$("#gallery"); const list=visibleCompounds();
+  if(!list.length){ g.innerHTML = state.compounds.length
+    ? `<div class="empty" style="grid-column:1/-1">No compounds match the filter.</div>`
+    : `<div class="empty" style="grid-column:1/-1">Nothing loaded yet.<br>Drop a <b>patent or paper PDF</b> in the Data panel, upload a <b>CSV / Excel / SDF</b>, or load the sample set — then structures appear here.</div>`;
+    return; }
+  g.innerHTML="";
+  for(const c of list){
+    const card=document.createElement("div");
+    card.className="card"+(c.valid?"":" bad");
+    card.setAttribute("aria-selected", c.id===state.selectedId);
+    card.tabIndex=0;
+    const dc=c.data&&c.data.dc50_nm!=null? `DC₅₀ ${fmtNum(c.data.dc50_nm)} nM` : (c.isGlue?"glue":"");
+    card.innerHTML=`<div class="depict">${c.valid?depict(c,{w:150,h:112}):'<div class="empty">invalid</div>'}</div>
+      <div class="cid" title="${esc(c.name)}">${c.needsReview?'<span title="needs review" style="color:var(--warn)">⚠ </span>':''}${esc(c.id)}</div>
+      <div class="crow"><span class="badge ${ligaseClass(c)}">${esc(e3Label(c))}</span><span class="potency">${esc(dc)}</span></div>`;
+    card.onclick=()=>{ select(c.id); };
+    card.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); select(c.id);} };
+    g.appendChild(card);
+  }
+}
+
+function renderChips(){
+  const wrap=$("#e3chips"); const present=new Map();
+  state.compounds.forEach(c=>{ const k=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE"); present.set(k,(present.get(k)||0)+1); });
+  wrap.innerHTML="";
+  const nReview=state.compounds.filter(c=>c.needsReview).length;
+  if(nReview){ const rb=document.createElement("button"); rb.className="chip"; rb.setAttribute("aria-pressed",state.filterReview);
+    rb.style.cssText="border-color:var(--warn);color:var(--warn)"; rb.textContent=`⚠ needs review (${nReview})`;
+    rb.onclick=()=>{ state.filterReview=!state.filterReview; renderChips(); renderGallery(); }; wrap.appendChild(rb); }
+  [...present.keys()].sort().forEach(k=>{
+    const b=document.createElement("button"); b.className="chip";
+    b.setAttribute("aria-pressed", state.filterE3.has(k));
+    b.textContent=`${k==="GLUE"?"Glue":k==="NONE"?"No anchor":k} (${present.get(k)})`;
+    b.onclick=()=>{ state.filterE3.has(k)?state.filterE3.delete(k):state.filterE3.add(k); renderChips(); renderGallery(); };
+    wrap.appendChild(b);
+  });
+}
+
+/* ---- compound detail ---- */
+function renderDetail(){
+  const pane=$("#pane-compound"); const c=state.compounds.find(x=>x.id===state.selectedId);
+  if(!c){ pane.innerHTML = state.compounds.length
+    ? `<div class="empty">Select a compound from the gallery.</div>`
+    : `<div class="empty">No compounds yet — upload a patent/paper PDF or a dataset in the <b>Data</b> panel.</div>`;
+    return; }
+  if(c.dataOnly){ const bio=c.data||{};
+    const cells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
+      return `<div class="prop"><div class="pl">${esc(meta[0])}</div><div class="pv" style="color:var(--accent)">${fmtNum(bio[k],meta[1]==="%"?0:1)} <small>${esc(meta[1])}</small></div></div>`; }).join("")||'<p class="help">No values.</p>';
+    pane.innerHTML=`<h2>${esc(c.id)}</h2><p class="sub">${esc(c.series||"")} · data-only record</p>
+      <div class="status ok" style="margin-bottom:12px">No structure attached. Add a SMILES (CSV/SDF) or an entry with the same identifier to attach these values to a molecule — then it joins the gallery and SAR views.</div>
+      <section class="block"><h3>Reported data</h3><div class="bio">${cells}</div></section>`; return; }
+  if(!c.valid){ pane.innerHTML=`<h2>${esc(c.id)}</h2><div class="status err">${esc(c.error||"invalid structure")}</div><p class="help" style="margin-top:10px">SMILES: <code>${esc(c.smiles)}</code></p>`; return; }
+  const D=c.desc;
+  const bRo5=[]; if(D.mw>500)bRo5.push("MW"); if(D.clogp>5)bRo5.push("cLogP"); if(D.hbd>5)bRo5.push("HBD"); if(D.hba>10)bRo5.push("HBA"); if(D.rot>10)bRo5.push("rot. bonds"); if(D.tpsa>140)bRo5.push("TPSA");
+  const prop=(label,val,unit,flag)=>`<div class="prop${flag?' flag':''}"><div class="pl">${label}</div><div class="pv">${val==null?'–':val}${unit?` <small>${unit}</small>`:''}</div></div>`;
+  const region=(r,extra)=>{ const on=(r==='war'?c.waratoms:r==='e3'?c.e3atoms:c.lnkatoms).length>0;
+    return `<div class="region"><span class="swatch" style="background:var(--reg-${r})"></span><div><div class="rname">${REGION[r].label}</div><div class="rmeta">${on?extra:'not identified'}</div></div></div>`; };
+  const bio=c.data||{};
+  const bioCells=Object.keys(bio).filter(k=>bio[k]!=null).map(k=>{ const meta=ASSAY_LABELS[k]||[k,"",false];
+    return prop(meta[0],fmtNum(bio[k], meta[1]==="%"?0:1),meta[1],false); }).join("")||'<p class="help">No biological data on this compound.</p>';
+
+  const reviewBanner = c.needsReview ? `<div class="status" style="background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span>⚠ <b>Needs review</b> — ${esc(c.reviewReason||"Claude-read")}. Compare the structure to the drawing.</span>
+      ${state.sample&&c.srcPage?`<button class="btn small" id="recheckBtn" style="margin-left:auto">Re-check with Claude</button>`:''}
+    </div>` : (c.source==="claude" ? `<div class="help" style="margin-bottom:10px">Read by Claude${c.claudeConfidence?` · confidence ${esc(c.claudeConfidence)}`:""} — verify against the drawing. ${state.sample&&c.srcPage?`<a href="#" id="recheckLink">re-check</a>`:""}</div>` : "");
+  pane.innerHTML=`
+    <h2>${c.needsReview?'<span style="color:var(--warn)">⚠ </span>':''}${esc(c.id)} <span style="font-weight:400;color:var(--muted);font-size:13px">${esc(c.name)}</span></h2>
+    <p class="sub">${esc(c.series||"")} ${c.isGlue?'· monovalent molecular glue':''}</p>
+    ${reviewBanner}
+    <div class="hl-ctrl">
+      <button class="btn small" id="toggleRegions" aria-pressed="true">Highlight regions</button>
+      <input id="hlIn" placeholder="highlight SMARTS… e.g. c1ccncc1" spellcheck="false" value="${esc(state.hlSmarts)}">
+    </div>
+    <div class="detailtop">
+      <div class="bigdepict" id="bigDepict"></div>
+      <div>
+        <section class="block"><h3>Degrader decomposition ${c.autoDecomp?'<span style="text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted)">· auto</span>':''}</h3>
+          <div class="decomp">
+            ${region('war', c.waratoms.length?`${c.waratoms.length} atoms · ${c.autoDecomp?'auto-detected':'matched scaffold'}`:(c.isGlue?'monovalent glue — no separate warhead':''))}
+            ${region('lnk', c.lnkatoms.length?`${c.desc.linker_len} atoms · ${c.desc.linker_peg_o||0} ether O (PEG-like)`:(c.isGlue?'none (molecular glue)':'not resolved'))}
+            ${region('e3', c.e3?`${c.e3.ligase} — ${c.e3.name}`:'no known E3 anchor detected')}
+          </div>
+          ${c.e3?`<p class="help" style="margin-top:7px">${esc(c.e3.note)}</p>`:''}
+          ${c.autoDecomp?`<p class="help" style="margin-top:4px">Automatic split (approximate). For exact regions on a congeneric series, set a warhead SMARTS under Advanced.</p>`:''}
+        </section>
+      </div>
+    </div>
+    <section class="block"><h3>Calculated properties ${bRo5.length?`<span style="color:var(--warn);text-transform:none;letter-spacing:0;font-weight:500">· beyond Ro5: ${bRo5.join(", ")}</span>`:''}</h3>
+      <div class="props">
+        ${prop("MW",D.mw,"Da",D.mw>500)}${prop("cLogP",D.clogp,"",D.clogp>5)}${prop("TPSA",D.tpsa,"Å²",D.tpsa>140)}
+        ${prop("HBD",D.hbd,"",D.hbd>5)}${prop("HBA",D.hba,"",D.hba>10)}${prop("Rot. bonds",D.rot,"",D.rot>10)}
+        ${prop("Rings",D.rings,"")}${prop("Fsp³",D.fsp3,"")}${prop("Heavy",D.heavy,"")}
+        ${c.desc.linker_len!=null?prop("Linker",c.desc.linker_len,"atoms"):""}
+      </div>
+    </section>
+    <section class="block"><h3>Biological data</h3><div class="bio">${bioCells}</div></section>
+    <section class="block"><h3>Canonical SMILES</h3><p class="help" style="word-break:break-all"><code>${esc(c.smiles)}</code></p></section>
+  `;
+  let showRegions=true;
+  const draw=()=>{ $("#bigDepict").innerHTML=depict(c,{w:420,h:300,regions:showRegions,extraSmarts:state.hlSmarts}); };
+  draw();
+  $("#toggleRegions").onclick=e=>{ showRegions=!showRegions; e.currentTarget.setAttribute("aria-pressed",showRegions); draw(); };
+  const hl=$("#hlIn"); hl.oninput=()=>{ state.hlSmarts=hl.value.trim(); draw(); renderGallery(); };
+  const rb=$("#recheckBtn")||$("#recheckLink"); if(rb) rb.onclick=e=>{ e.preventDefault(); recheckWithClaude(c.id); };
+}
+// Self-verification: re-render the source page, ask Claude to compare its SMILES to the drawing.
+async function recheckWithClaude(id){
+  const c=state.compounds.find(x=>x.id===id); if(!c||!state.sample||!state.pdfDoc||!c.srcPage){ return; }
+  const btn=$("#recheckBtn")||$("#recheckLink"); if(btn){ btn.textContent="Re-checking…"; btn.disabled=true; }
+  try{
+    const blob=await renderPdfPage(state.pdfDoc,c.srcPage);
+    const prompt=`This image is page ${c.srcPage} of a patent/paper. For the compound labelled "${c.id}", I have this SMILES: ${c.smiles}\nLook at how "${c.id}" is actually drawn on the page and reply ONLY as JSON {"match": true|false, "corrected_smiles": "<a corrected SMILES, or empty if match is true>", "note": "<short reason>"}. No text outside the JSON.`;
+    const res=await state.sample.json(prompt,{images:[blob],modelTier:"complex"});
+    if(res && res.match===true){ c.needsReview=false; c.reviewReason=""; c.reviewNote="Re-checked by Claude: matches the drawing."; }
+    else { const fixed=res&&res.corrected_smiles? withMol(res.corrected_smiles,m=>m.get_smiles()) : null;
+      if(fixed){ const i=state.compounds.indexOf(c); const kept={id:c.id,name:c.name,series:c.series,data:c.data,source:"claude",srcPage:c.srcPage,claudeConfidence:c.claudeConfidence};
+        const nc=analyse({id:c.id,name:c.name,series:c.series,smiles:fixed,data:c.data||{}}); Object.assign(nc,kept); nc.smiles=fixed;
+        nc.needsReview=false; nc.reviewNote="Corrected by Claude on re-check: "+((res&&res.note)||""); state.compounds[i]=nc; }
+      else { c.reviewNote="Re-check: Claude could not confirm — "+((res&&res.note)||"check manually")+"."; } }
+    refreshAll();
+  }catch(e){ if(btn){ btn.textContent="Re-check failed"; btn.disabled=false; } }
+}
+
+/* ---- SAR chart ---- */
+function numericFields(){
+  const fields=[...DESCRIPTOR_FIELDS.map(f=>({key:f[0],label:f[1],unit:f[2],from:"desc"}))];
+  const seen=new Set();
+  state.compounds.forEach(c=>{ const d=c.data||{}; Object.keys(d).forEach(k=>{ if(d[k]!=null && typeof d[k]==="number" && !seen.has(k)){ seen.add(k);
+    const meta=ASSAY_LABELS[k]; fields.push({key:k,label:meta?meta[0]:k,unit:meta?meta[1]:"",from:"data",log:meta?meta[2]:false}); } }); });
+  return fields;
+}
+function fieldVal(c,key){ if(!c.valid) return null;
+  if(c.desc&&c.desc[key]!=null) return c.desc[key];
+  if(c.data&&c.data[key]!=null) return c.data[key]; return null; }
+function fieldMeta(key){ return numericFields().find(f=>f.key===key); }
+function seriesColorVar(c){ // colour by E3 ligase or series
+  if(state.chart.color==="ligase"){ const k=c.e3?c.e3.ligase:(c.isGlue?"GLUE":"NONE");
+    return {CRBN:"--s1",VHL:"--s2",MDM2:"--s3",DCAF15:"--s4",GLUE:"--muted",NONE:"--muted"}[k]||"--muted"; }
+  const idx=[...new Set(state.compounds.map(x=>x.series))].indexOf(c.series);
+  return ["--s1","--s2","--s3","--s4","--s5"][idx%5];
+}
+function seriesKey(c){ return state.chart.color==="ligase" ? (c.e3?c.e3.ligase:(c.isGlue?"Glue":"No anchor")) : (c.series||"—"); }
+
+function renderChartControls(){
+  const flds=numericFields();
+  const opt=(sel)=>flds.map(f=>`<option value="${f.key}" ${f.key===sel?"selected":""}>${esc(f.label)}${f.unit?` (${f.unit})`:""}</option>`).join("");
+  $("#chartCtrls").innerHTML=`
+    <div class="field"><label>X axis</label><select id="xSel">${opt(state.chart.x)}</select></div>
+    <div class="field"><label>Y axis</label><select id="ySel">${opt(state.chart.y)}</select></div>
+    <div class="field"><label>Colour by</label><select id="cSel"><option value="ligase" ${state.chart.color==="ligase"?"selected":""}>E3 ligase</option><option value="series" ${state.chart.color==="series"?"selected":""}>Series</option></select></div>
+    <div class="field"><label>Y scale</label><button class="btn small" id="logBtn" aria-pressed="${state.chart.log}">log₁₀</button></div>`;
+  $("#xSel").onchange=e=>{state.chart.x=e.target.value;renderChart();};
+  $("#ySel").onchange=e=>{state.chart.y=e.target.value;renderChart();};
+  $("#cSel").onchange=e=>{state.chart.color=e.target.value;renderChart();};
+  $("#logBtn").onclick=e=>{state.chart.log=!state.chart.log;e.currentTarget.setAttribute("aria-pressed",state.chart.log);renderChart();};
+}
+function renderChart(){
+  const svg=$("#chart"); const W=640,H=380, m={l:64,r:18,t:16,b:52};
+  const xm=fieldMeta(state.chart.x), ym=fieldMeta(state.chart.y);
+  const pts=state.compounds.map(c=>({c,x:fieldVal(c,state.chart.x),y:fieldVal(c,state.chart.y)})).filter(p=>p.x!=null&&p.y!=null&&!isNaN(p.x)&&!isNaN(p.y));
+  const canLog = state.chart.log && pts.every(p=>p.y>0);
+  const yAcc = canLog? (v=>Math.log10(v)) : (v=>v);
+  if(!pts.length){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--muted)" font-size="14">No compounds have both ${esc(xm?xm.label:state.chart.x)} and ${esc(ym?ym.label:state.chart.y)}.</text>`; $("#chartLegend").innerHTML=""; $("#chartNote").textContent=""; return; }
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>yAcc(p.y));
+  let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  if(xmin===xmax){xmin-=1;xmax+=1;} if(ymin===ymax){ymin-=1;ymax+=1;}
+  const padx=(xmax-xmin)*0.08, pady=(ymax-ymin)*0.1; xmin-=padx;xmax+=padx;ymin-=pady;ymax+=pady;
+  const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const Y=v=>H-m.b-(yAcc(v)-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  const Yraw=v=>H-m.b-(v-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  let g=`<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="none"/>`;
+  // gridlines + ticks
+  const yticks=niceTicks(ymin,ymax,5), xticks=niceTicks(xmin,xmax,6);
+  yticks.forEach(t=>{ const y=Yraw(t); g+=`<line x1="${m.l}" y1="${y}" x2="${W-m.r}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    const lbl=canLog? sci(Math.pow(10,t)) : trim(t);
+    g+=`<text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${lbl}</text>`; });
+  xticks.forEach(t=>{ const x=X(t); g+=`<line x1="${x}" y1="${m.t}" x2="${x}" y2="${H-m.b}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
+    g+=`<text x="${x}" y="${H-m.b+18}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${trim(t)}</text>`; });
+  // axis labels
+  g+=`<text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(xm?xm.label:state.chart.x)}${xm&&xm.unit?` (${xm.unit})`:""}</text>`;
+  g+=`<text transform="translate(16 ${m.t+(H-m.t-m.b)/2}) rotate(-90)" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(ym?ym.label:state.chart.y)}${ym&&ym.unit?` (${ym.unit})`:""}${canLog?" · log₁₀":""}</text>`;
+  // connect points within same series when X is monotonic-ish (helps linker trend lines)
+  const bySeries={}; pts.forEach(p=>{ (bySeries[seriesKey(p.c)] ||= []).push(p); });
+  Object.entries(bySeries).forEach(([k,arr])=>{ if(arr.length<2) return; const col=seriesColorVar(arr[0].c);
+    const sorted=[...arr].sort((a,b)=>a.x-b.x);
+    const dstr=sorted.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`).join(" ");
+    g+=`<path d="${dstr}" fill="none" stroke="var(${col})" stroke-width="1.6" opacity="0.4" stroke-dasharray="4 3"/>`; });
+  // points
+  pts.forEach((p,i)=>{ const col=seriesColorVar(p.c); const cx=X(p.x),cy=Y(p.y);
+    g+=`<circle data-i="${i}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="var(${col})" stroke="var(--stage)" stroke-width="1.6"/>`;
+    if(pts.length<=16) g+=`<text x="${cx}" y="${cy-9}" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="var(--f-mono)">${esc(p.c.id)}</text>`; });
+  svg.innerHTML=g;
+  // legend
+  const groups=[...new Set(pts.map(p=>seriesKey(p.c)))];
+  $("#chartLegend").innerHTML=groups.map(k=>{ const ex=pts.find(p=>seriesKey(p.c)===k); return `<span><i style="background:var(${seriesColorVar(ex.c)})"></i>${esc(k)}</span>`; }).join("");
+  // correlation note
+  const r=pearson(pts.map(p=>p.x),pts.map(p=>yAcc(p.y)));
+  $("#chartNote").innerHTML = pts.length>2 ? `Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog?" (log Y)":""}. ${trendText(state.chart.x,state.chart.y,r,pts)}` : `${pts.length} compound(s) plotted.`;
+  // hover
+  const tip=$("#tip"); const wrap=$("#chartWrap");
+  svg.querySelectorAll("circle[data-i]").forEach(el=>{
+    el.style.cursor="pointer";
+    el.onmouseenter=()=>{ const p=pts[+el.dataset.i]; const bb=wrap.getBoundingClientRect(); const sb=svg.getBoundingClientRect();
+      const sx=sb.width/W, sy=sb.height/H; const px=(+el.getAttribute("cx"))*sx+(sb.left-bb.left), py=(+el.getAttribute("cy"))*sy+(sb.top-bb.top);
+      tip.innerHTML=`<b>${esc(p.c.id)}</b><div class="trow">${esc(xm?xm.label:"x")}<span>${fmtNum(p.x,2)}</span></div><div class="trow">${esc(ym?ym.label:"y")}<span>${fmtNum(p.y,2)}</span></div><div class="trow">E3<span>${esc(p.c.e3?p.c.e3.ligase:(p.c.isGlue?"glue":"—"))}</span></div>`;
+      tip.style.opacity=1; tip.style.left=Math.min(bb.width-140,px+12)+"px"; tip.style.top=Math.max(0,py-10)+"px"; el.setAttribute("r","8"); };
+    el.onmouseleave=()=>{ tip.style.opacity=0; el.setAttribute("r","6"); };
+    el.onclick=()=>{ const p=pts[+el.dataset.i]; select(p.c.id); switchTab("compound"); };
+  });
+}
+function trendText(xKey,yKey,r,pts){
+  const potency=["dc50_nm","target_ic50_nm","ec50_nm","ki_nm","kd_nm","ternary_kd_nm"].includes(yKey);
+  if(xKey==="linker_len" && potency && pts && pts.length>=3){
+    const best=pts.reduce((a,b)=>b.y<a.y?b:a);
+    const xm=fieldMeta(yKey);
+    return `Most potent at a linker of <b>${best.x} atoms</b> (${esc(best.c.id)}, ${fmtNum(best.y)}${xm&&xm.unit?" "+xm.unit:""}). Linker-length SAR is usually biphasic — read the optimum, not the slope.`;
+  }
+  if(Math.abs(r)<0.2) return "No strong linear trend.";
+  return r>0?"Positive linear association.":"Negative linear association.";
+}
+
+/* ---- table ---- */
+function tableColumns(){
+  return [ {k:"id",l:"ID",t:"t"},{k:"series",l:"Series",t:"t"},{k:"e3",l:"E3",t:"t"},
+    {k:"mw",l:"MW",t:"n"},{k:"clogp",l:"cLogP",t:"n"},{k:"tpsa",l:"TPSA",t:"n"},
+    {k:"hbd",l:"HBD",t:"n"},{k:"hba",l:"HBA",t:"n"},{k:"rot",l:"Rot",t:"n"},
+    {k:"linker_len",l:"Linker",t:"n"},{k:"dc50_nm",l:"DC₅₀ nM",t:"p"},{k:"dmax_pct",l:"Dmax %",t:"n"},{k:"target_ic50_nm",l:"IC₅₀ nM",t:"n"} ];
+}
+function cellVal(c,k){ if(k==="id")return c.id; if(k==="series")return c.series||""; if(k==="e3")return c.e3?c.e3.ligase:(c.isGlue?"glue":"—");
+  if(c.desc&&c.desc[k]!=null)return c.desc[k]; if(c.data&&c.data[k]!=null)return c.data[k]; return null; }
+function renderTable(){
+  const cols=tableColumns(); const th=$("#dataTable thead"), tb=$("#dataTable tbody");
+  th.innerHTML="<tr>"+cols.map(col=>`<th data-k="${col.k}">${col.l}${state.sort.key===col.k?(state.sort.dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
+  th.querySelectorAll("th").forEach(h=>h.onclick=()=>{ const k=h.dataset.k; if(state.sort.key===k)state.sort.dir*=-1; else {state.sort.key=k;state.sort.dir=1;} renderTable(); });
+  const rows=[...state.compounds].filter(c=>c.valid||c.dataOnly).sort((a,b)=>{ let va=cellVal(a,state.sort.key),vb=cellVal(b,state.sort.key);
+    if(va==null)return 1; if(vb==null)return -1; if(typeof va==="number"&&typeof vb==="number")return (va-vb)*state.sort.dir; return String(va).localeCompare(String(vb))*state.sort.dir; });
+  tb.innerHTML=rows.map(c=>"<tr data-id='"+esc(c.id)+"' aria-selected='"+(c.id===state.selectedId)+"'>"+cols.map(col=>{
+      let v=cellVal(c,col.k);
+      if(col.t==="t") return `<td>${esc(v==null?"":v)}</td>`;
+      if(col.t==="p"){ return `<td class="num"><span class="pcell" style="background:${potencyColor(v)}">${v==null?"–":fmtNum(v)}</span></td>`; }
+      return `<td class="num">${v==null?"–":fmtNum(v, (col.k==="clogp"||col.k==="fsp3"||col.k==="tpsa")?1:0)}</td>`;
+    }).join("")+"</tr>").join("");
+  tb.querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{ select(tr.dataset.id); switchTab("compound"); });
+  $("#tableNote").innerHTML=`${rows.length} rows. DC₅₀ cells shaded by potency (darker = more potent). Click a row to inspect.`;
+}
+function toCSV(){
+  const cols=tableColumns(); const head=["id","name","smiles",...cols.filter(c=>c.k!=="id").map(c=>c.k)];
+  const lines=[head.join(",")];
+  state.compounds.forEach(c=>{ const row=[c.id,q(c.name),q(c.smiles)];
+    cols.filter(col=>col.k!=="id").forEach(col=>{ let v=cellVal(c,col.k); row.push(v==null?"":(typeof v==="string"?q(v):v)); });
+    lines.push(row.join(",")); });
+  return lines.join("\n");
+  function q(s){ s=String(s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+}
+
+/* ============================ ingestion ============================ */
+function addCompounds(rows,{replace=false}={}){
+  if(replace) state.compounds=[];
+  const existing=new Map(state.compounds.map((c,i)=>[c.id,i]));
+  let added=0,bad=0,merged=0,dataOnly=0;
+  for(const r of rows){
+    if(!r.smiles){ // no structure: merge onto a matching compound, else keep as a data-only record
+      if(existing.has(r.id)){ const c=state.compounds[existing.get(r.id)]; c.data={...c.data,...r.data}; merged++; }
+      else { const c={id:r.id,name:r.name||r.id,series:r.series||"data",smiles:"",data:r.data||{},
+        valid:false,dataOnly:true,desc:{},e3:null,e3atoms:[],waratoms:[],lnkatoms:[],regionMap:{}};
+        existing.set(r.id,state.compounds.length); state.compounds.push(c); dataOnly++; }
+      continue; }
+    const c=analyse(r); if(!c.valid) bad++; else added++;
+    if(existing.has(c.id)){ state.compounds[existing.get(c.id)]=c; } else { existing.set(c.id,state.compounds.length); state.compounds.push(c); }
+  }
+  refreshAll();
+  return {added,bad,merged,dataOnly};
+}
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/).filter(l=>l.trim()); if(!lines.length) return [];
+  const delim = lines[0].includes("\t")?"\t":",";
+  const header=splitCSV(lines[0],delim).map(h=>h.trim().toLowerCase());
+  const si=header.findIndex(h=>["smiles","structure","canonical_smiles","smi"].includes(h));
+  const ii=header.findIndex(h=>["id","name","compound","compound_id","cid","example"].includes(h));
+  const rows=[];
+  for(let li=1;li<lines.length;li++){ const cells=splitCSV(lines[li],delim); if(!cells.length) continue;
+    const id = ii>=0? cells[ii] : ("CMPD-"+li);
+    const smiles = si>=0? (cells[si]||"").trim() : "";
+    const data={};
+    header.forEach((h,ci)=>{ if(ci===si||ci===ii) return; const raw=(cells[ci]||"").trim(); if(raw==="") return;
+      const num=parseFloat(raw.replace(/[,%]/g,"")); const key=normAssay(h); if(!isNaN(num)) data[key]=num; });
+    rows.push({id:id||("CMPD-"+li),name:(ii>=0?cells[ii]:id)||("CMPD-"+li),series:"imported",smiles,data});
+  }
+  return rows;
+}
+function normAssay(h){ h=h.replace(/[\s()]+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"");
+  const map={dc50:"dc50_nm","dc50_nm":"dc50_nm",dc_50:"dc50_nm",dmax:"dmax_pct","dmax_":"dmax_pct",dmax_pct:"dmax_pct","dmax_percent":"dmax_pct",
+    ic50:"target_ic50_nm",ic50_nm:"target_ic50_nm",target_ic50:"target_ic50_nm",ec50:"ec50_nm",ec50_nm:"ec50_nm",ki:"ki_nm",kd:"kd_nm",ternary_kd:"ternary_kd_nm"};
+  return map[h]||h;
+}
+function splitCSV(line,delim){ const out=[]; let cur="",inq=false;
+  for(let i=0;i<line.length;i++){ const ch=line[i];
+    if(inq){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else inq=false; } else cur+=ch; }
+    else { if(ch==='"')inq=true; else if(ch===delim){out.push(cur);cur="";} else cur+=ch; } }
+  out.push(cur); return out; }
+function parseSmilesList(text){
+  return text.trim().split(/\r?\n/).filter(l=>l.trim()).map((l,i)=>{ const parts=l.trim().split(/\s+/);
+    return {id:parts[1]||("SMI-"+(i+1)),name:parts.slice(1).join(" ")||("SMI-"+(i+1)),series:"imported",smiles:parts[0],data:{}}; }); }
+function parseSDF(text){
+  const recs=text.split(/\$\$\$\$/).map(r=>r.trim()).filter(r=>r); const rows=[];
+  recs.forEach((rec,ri)=>{ const lines=rec.split(/\r?\n/); const name=(lines[0]||("MOL-"+(ri+1))).trim()||("MOL-"+(ri+1));
+    const mend=rec.indexOf("M  END"); const molblock=mend>=0?rec.slice(0,mend+6):null; if(!molblock)return;
+    let smiles=""; const m=state.rdkit.get_mol(molblock); if(m){ if(m.is_valid())smiles=m.get_smiles(); m.delete(); }
+    const data={}; const re=/>\s+<([^>]+)>\s*\r?\n([^\n]+)/g; let mm;
+    while((mm=re.exec(rec))){ const num=parseFloat(mm[2].replace(/[,%]/g,"")); if(!isNaN(num))data[normAssay(mm[1].trim().toLowerCase())]=num; }
+    rows.push({id:name,name,series:"imported",smiles,data}); });
+  return rows;
+}
+function molCandidate(t){ return t.length>=8 && /[0-9()]/.test(t) && /^[A-Za-z0-9@+\-\[\]()=#$%\/\\.]+$/.test(t) && (t.match(/[A-Z]/g)||[]).length>=2; }
+function validSmiles(t,min){ min=min||8;
+  for(const cand of [t, t.replace(/[.,;:]+$/,"")]){ if(!cand) continue;
+    const m=state.rdkit.get_mol(cand); let ok=false,can=null;
+    try{ ok=m&&m.is_valid()&&m.get_num_atoms()>=min; can=ok?m.get_smiles():null; }catch(e){}
+    if(m) m.delete(); if(ok) return can; }
+  return null; }
+function findSmilesInText(seg){
+  const lab=seg.match(/SMILES\s*[:=]\s*([^\s,;]+)/i); if(lab){ const c=validSmiles(lab[1],4); if(c) return c; }
+  const toks=seg.split(/[\s,;]+/);
+  for(const t of toks){ if(molCandidate(t)){ const c=validSmiles(t,8); if(c) return c; } }
+  return ""; }
+function extractPatentRecords(text){
+  const rows=[];
+  const segs=text.split(/(?=(?:example|compound|cmpd|cpd)\s*[:#.]?\s*[0-9])/i);
+  const conv=(v,u)=>{ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="mm")return v*1e6; if(u==="pm")return v/1000; return v; };
+  segs.forEach(seg=>{ const idm=seg.match(/(?:example|compound|cmpd|cpd)\s*[:#.]?\s*([0-9]+[a-z]?)/i); if(!idm) return;
+    const label=idm[0].replace(/\s+/g," ").replace(/[:#.]/g,"").trim();
+    const id=label.charAt(0).toUpperCase()+label.slice(1);
+    const data={};
+    const dc=seg.match(/dc\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
+    const ic=seg.match(/ic\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
+    const ec=seg.match(/ec\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ec)data.ec50_nm=conv(ec[1],ec[2]);
+    const ki=seg.match(/\bki\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ki)data.ki_nm=conv(ki[1],ki[2]);
+    const kd=seg.match(/\bkd\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(kd)data.kd_nm=conv(kd[1],kd[2]);
+    const dmax=seg.match(/d\s*max[^0-9]{0,10}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
+    const smiles=findSmilesInText(seg);
+    if(Object.keys(data).length||smiles) rows.push({id,name:id,series:"patent/paper",smiles,data}); });
+  return rows; }
+// Target / protein-of-interest (POI) detection from the document text.
+const KNOWN_TARGETS = ["BRD4","BRD9","BRD2","BRD3","BRD7","BET","androgen receptor","AR","estrogen receptor","ER","BTK","BCL6","BCL-XL","BCL2","EGFR","ALK","CDK2","CDK4","CDK6","CDK9","CDK12","STAT3","STAT5","IRAK4","IRAK3","SMARCA2","SMARCA4","KRAS","FAK","FAK1","BRAF","HDAC6","HDAC1","WDR5","WEE1","PARP1","PARP14","MDM2","MCL1","MCL-1","TRK","NTRK","FLT3","JAK2","PTK2","MET","RIPK2","TBK1","SIRT2","TAU","MAPT","PCSK9","IDO1","HPK1","CBP","p300","EP300","MLL","KEAP1","NAMPT","PLK1","AKT","PI3K","mTOR","BCR-ABL","ABL","B7-H3","CDK8","NSD3","FKBP12","DHODH","GSPT1","IKZF1","IKZF2","IKZF3","CK1","RBM39","SALL4"];
+function detectTargets(text){
+  if(!text) return [];
+  const hits=new Set();
+  KNOWN_TARGETS.forEach(t=>{ const re=new RegExp("\\b"+t.replace(/[-/\\^$*+?.()|[\]{}]/g,"\\$&")+"\\b","i"); if(re.test(text)) hits.add(t.toUpperCase()==="AR"||t.toUpperCase()==="ER"?t:t); });
+  // "degrader of X" / "degradation of X" / "targeting X"
+  let m; const re=/(?:degrad(?:er|ation|ing)s?\s+of|targeting|inhibitor of|degrade[sd]?)\s+(?:the\s+)?([A-Z][A-Za-z0-9\-]{1,14}(?:\s[A-Z][A-Za-z0-9\-]{1,14}){0,2})/g;
+  while((m=re.exec(text))){ const cand=m[1].trim(); if(/^[A-Z0-9]/.test(cand) && cand.length<=28 && !/^(the|this|compound|protein|disease|cancer|a|an)$/i.test(cand)) hits.add(cand); }
+  return [...hits].slice(0,6);
+}
+function parseXLSX(buf){
+  if(!window.XLSX) return [];
+  try{ const wb=XLSX.read(new Uint8Array(buf),{type:"array"}); const ws=wb.Sheets[wb.SheetNames[0]];
+    if(!ws) return []; return parseCSV(XLSX.utils.sheet_to_csv(ws)); }
+  catch(e){ return []; }
+}
+async function extractFromPDF(file){
+  const url=($("#ocsrUrl")?$("#ocsrUrl").value.trim():"");
+  if(url) return extractViaServer(file,url,$("#ocsrOn")&&$("#ocsrOn").checked);
+  return extractFromPDFClient(file);
+}
+async function extractViaServer(file,url,ocsr){
+  Progress.start("Uploading to OCSR server", esc(file.name));
+  try{
+    const fd=new FormData(); fd.append("pdf",file); fd.append("ocsr",ocsr?"1":"0");
+    const res=await fetch(url.replace(/\/+$/,"")+"/extract",{method:"POST",body:fd});
+    if(!res.ok) throw new Error("server returned "+res.status);
+    const j=await res.json(); Progress.done();
+    const rows=(j.records||[]).map(r=>({id:r.id,name:r.id,
+      series:(r.source||"").includes("ocsr")?"patent (OCSR)":"patent",
+      smiles:r.smiles||"",data:r.data||{}}));
+    if(!rows.length){ setStatus(`Server read ${j.pages} page(s) of ${esc(j.filename||file.name)} but found no records.`,false); return; }
+    const withS=rows.filter(r=>r.smiles).length, rr=addCompounds(rows);
+    const extra=j.ocsr_used?" OCSR recovered drawn structures." : (ocsr&&j.ocsr_error?` Server OCSR unavailable (${esc(j.ocsr_error)}).`:"");
+    setStatus(`${esc(j.filename||file.name)} via server: ${j.pages} pages → ${rows.length} records (${withS} with SMILES). Added ${rr.added}, merged ${rr.merged}, ${rr.dataOnly} data-only.${extra}`, rr.bad===0);
+  }catch(e){ Progress.hide();
+    setStatus("OCSR server unreachable ("+e.message+") — using in-browser text extraction instead.",false);
+    return extractFromPDFClient(file); }
+}
+async function extractFromPDFClient(file){
+  if(!window.pdfjsLib){ setStatus("PDF reader did not load — reload the page and try again.",false); return; }
+  Progress.start("Reading PDF", "opening "+file.name);
+  try{
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
+    state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
+    let text=""; const pageTexts=[];
+    for(let p=1;p<=pdf.numPages;p++){ Progress.set("Reading text", p/pdf.numPages, `page ${p} / ${pdf.numPages}`);
+      const page=await pdf.getPage(p); const tc=await page.getTextContent();
+      const pt=tc.items.map(i=>i.str).join(" "); pageTexts.push(pt); text+=pt+"\n"; if(page.cleanup)page.cleanup(); }
+    const rows=extractPatentRecords(text);
+    const tg=detectTargets(text); if(tg.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tg])]; renderTargets(); }
+    const withStruct=rows.filter(r=>r.smiles).length;
+    const r=rows.length?addCompounds(rows):{added:0,merged:0,dataOnly:0,bad:0};
+    let msg=`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} text record(s) (${withStruct} with SMILES). Added ${r.added}, ${r.dataOnly} data-only.`;
+    if(tg.length) msg+=` Target (POI): ${esc(tg.join(", "))}.`;
+    const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
+    if(visionOn){
+      const ctl=new AbortController(); state.visionAbort=ctl; Progress.stopBtn(true,()=>ctl.abort());
+      const range=parseRange($("#pdfRange")?$("#pdfRange").value:"", pdf.numPages);
+      const found=await findStructurePages(pdf, pageTexts, range, ctl);
+      const v=await visionScanPdf(pdf, found.candidates, ctl);
+      Progress.stopBtn(false); state.visionAbort=null;
+      if(v.scanned) msg+=` Scanned ${v.scanned} likely compound page(s)${range?` in your range`:` (skipped the rest of ${pdf.numPages})`}; Claude read ${v.found} structure(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. Check the “Claude-read” compounds.`;
+      else msg+=` No numbered-compound structure pages were found${range?" in that page range":""}.`;
+    } else if(!rows.length){
+      msg=`Read ${pdf.numPages} page(s) of ${esc(file.name)} but found no text records. If the structures are drawings, tick “read drawn structures too”${state.sample?"":" (available in the claude.ai artifact)"} and re-upload.`;
+    }
+    Progress.done(); setStatus(msg, r.bad===0);
+  }catch(e){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null; setStatus("PDF error: "+e.message,false); }
+}
+function normId(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+async function pageHasGraphics(pdf,n){
+  try{ const page=await pdf.getPage(n); const ops=await page.getOperatorList(); const O=pdfjsLib.OPS;
+    let img=0,paths=0;
+    for(const fn of ops.fnArray){
+      if(fn===O.paintImageXObject||fn===O.paintInlineImageXObject||fn===O.paintImageMaskXObject) img++;
+      else if(fn===O.constructPath||fn===O.stroke||fn===O.fill||fn===O.eoFill||fn===O.closeStroke||fn===O.fillStroke) paths++;
+    }
+    if(page.cleanup)page.cleanup();
+    return img>0 || paths>=30; // raster image, or many line segments (a drawn structure)
+  }catch(e){ return false; }
+}
+// --- OCSR accuracy: formula cross-check + confidence -> "needs review" ---
+function formulaFromSmiles(smiles){ return withMol(smiles,m=>{ try{ const ic=m.get_inchi(); const mm=ic.match(/^InChI=1S?\/([^\/]+)/); return mm?mm[1]:null; }catch(e){ return null; } }); }
+function parseFormula(f){ const map={}; if(!f) return map; (String(f).match(/[A-Z][a-z]?\d*/g)||[]).forEach(t=>{ const mm=t.match(/([A-Z][a-z]?)(\d*)/); map[mm[1]]=(map[mm[1]]||0)+(mm[2]?+mm[2]:1); }); return map; }
+function formulasMatch(a,b){ const A=parseFormula(a),B=parseFormula(b); const keys=new Set([...Object.keys(A),...Object.keys(B)]); if(!keys.size) return true; for(const k of keys){ if((A[k]||0)!==(B[k]||0)) return false; } return true; }
+function reviewReasons(o,canon){ const r=[]; const conf=(o.confidence||"").toLowerCase();
+  if(conf==="low") r.push("low confidence"); else if(conf==="medium") r.push("medium confidence");
+  if(o.formula){ const fRD=formulaFromSmiles(canon); if(fRD && !formulasMatch(o.formula,fRD)) r.push(`formula mismatch (read ${o.formula} vs SMILES ${fRD})`); }
+  return r; }
+// Merge a Claude-read structure onto its matching text record (by compound label), keeping the data.
+function mergeVisionStructure(o, srcPage){
+  const canon=withMol(o.smiles,m=>m.get_smiles()); if(!canon) return 0;
+  const nid=normId(o.id);
+  if(!nid && !state.keepUnnumbered) return 0; // tidy: drop unnumbered structures (intermediates / fragments)
+  const reasons=reviewReasons(o,canon);
+  const flag=c=>{ c.source="claude"; c.needsReview=reasons.length>0; c.reviewReason=reasons.join("; ");
+    c.claudeConfidence=o.confidence||null; c.claudeFormula=o.formula||null; if(srcPage)c.srcPage=srcPage; return c; };
+  const tgt=nid?state.compounds.find(c=>normId(c.id)===nid):null;
+  if(tgt){
+    if(tgt.dataOnly||!tgt.valid){ const i=state.compounds.indexOf(tgt);
+      const base=(tgt.series||"patent").replace(/ · Claude-read.*/,"");
+      state.compounds[i]=flag(analyse({id:tgt.id,name:tgt.name,series:base+" · Claude-read",smiles:canon,data:tgt.data||{}}));
+      return 1; }
+    return 0; // already has a structure from the text — keep the exact one
+  }
+  const id=o.id||("Claude-"+(state.compounds.length+1));
+  state.compounds.push(flag(analyse({id,name:id,series:"patent/paper · Claude-read",smiles:canon,data:{}})));
+  return 1;
+}
+// Quick context score for a page's text: does it look like a numbered-compound / assay / SMILES page?
+function textScore(t){ if(!t) return 0; let s=0;
+  if(/\b(example|compound|cmpd|cpd)\s*\.?\s*\d/i.test(t)) s+=2;
+  if(/\b(ic50|dc50|ec50|gi50|ki|kd|dmax)\b/i.test(t) || /\b\d+(\.\d+)?\s*(nm|µm|um|nmol)\b/i.test(t)) s+=1;
+  if(/smiles|inchi/i.test(t)) s+=1;
+  if(((t.match(/\b\d{1,3}\b/g)||[]).length) >= 15) s+=1; // a table of numbered rows
+  return s;
+}
+function parseRange(str,total){ str=(str||"").trim(); if(!str) return null; const set=new Set();
+  const lm=str.match(/last\s+(\d+)/i); if(lm){ const n=+lm[1]; for(let p=Math.max(1,total-n+1);p<=total;p++)set.add(p); return set.size?set:null; }
+  str.split(",").forEach(part=>{ part=part.trim(); const m=part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if(m){ const a=Math.max(1,+m[1]),b=Math.min(total,+m[2]); for(let p=a;p<=b;p++)set.add(p); }
+    else { const n=+part; if(n>=1&&n<=total)set.add(n); } });
+  return set.size?set:null;
+}
+// Pass 1: use the already-read text to pick the few pages that hold numbered structures, then
+// run the (slower) graphics check only on those — so most of the document is skipped.
+async function findStructurePages(pdf, pageTexts, range, ctl){
+  const total=pdf.numPages;
+  const scored=[]; for(let p=1;p<=total;p++){ if(range&&!range.has(p)) continue; scored.push({p,ts:textScore(pageTexts[p-1]||"")}); }
+  const primary = range ? scored : scored.filter(s=>s.ts>0);
+  let graphicsCount=0; const withGfx=[];
+  const scan=async(list)=>{ for(const it of list){ if(ctl&&ctl.signal.aborted) break;
+    Progress.set("Finding the numbered-compound pages", null, `checking page ${it.p} / ${total}`);
+    if(await pageHasGraphics(pdf,it.p)){ graphicsCount++; withGfx.push(it); } } };
+  await scan(primary);
+  if(!withGfx.length && !range){ await scan(scored.filter(s=>s.ts===0)); } // fallback: text gave no clues (scanned doc)
+  let candidates=withGfx.filter(it=>it.ts>0).map(it=>it.p);
+  if(!candidates.length) candidates=withGfx.map(it=>it.p);
+  candidates.sort((a,b)=>a-b);
+  return {candidates, graphicsCount};
+}
+async function visionScanPdf(pdf, pages, ctl){
+  if(!pages || !pages.length || (ctl&&ctl.signal.aborted)) return {scanned:0,found:0};
+  const t0=Date.now(); let done=0,found=0,stopped=false,rateLimited=false;
+  const update=()=>{ let eta=done>0 ? " · ~"+fmtDur((Date.now()-t0)/done*(pages.length-done)/1000)+" left" : " · estimating…";
+    Progress.set("Reading structures with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} found${ctl.signal.aborted?"":eta}`); };
+  update();
+  const worker=async(p)=>{
+    if(ctl.signal.aborted) return;
+    try{
+      const blob=await renderPdfPage(pdf,p);
+      const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:"complex",signal:ctl.signal});
+      (Array.isArray(arr)?arr:[]).forEach(o=>{ if(o&&o.smiles) found+=mergeVisionStructure(o,p); });
+      refreshAll();
+    }catch(e){ if(e.code==="cancelled"){stopped=true;} else if(e.code==="rate_limited"){rateLimited=true;ctl.abort();}
+      else if(e.code==="not_granted"||e.code==="sampling_disabled"){stopped=true;ctl.abort();} }
+    done++; update();
+  };
+  const queue=[...pages]; const run=async()=>{ while(queue.length && !ctl.signal.aborted){ await worker(queue.shift()); } };
+  await Promise.all([run(),run()]); // small concurrency to respect rate limits
+  Progress.stopBtn(false); state.visionAbort=null;
+  return {scanned:pages.length, found, stopped, rateLimited};
+}
+
+/* ============================ Claude vision OCSR (in-browser) ============================ */
+const OCSR_PROMPT = `You are an expert cheminformatician performing optical chemical structure recognition (OCSR) on drawings from a medicinal-chemistry patent or paper. The structures may be heterobifunctional degraders (PROTACs) or molecular glues.
+
+Return ONLY a JSON array, one element per distinct drawn FINAL compound:
+[{"id": <string|null>, "smiles": <string>, "formula": <string>, "confidence": "high"|"medium"|"low"}]
+- "smiles": one valid SMILES for that structure. Include stereochemistry (@, @@, / , \\) where it is drawn. Expand only abbreviations you are sure of (e.g. Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see.
+- "id": the compound label printed beside it if visible (e.g. "Example 12", "Compound 7"), else null.
+- "formula": the molecular formula of your SMILES in Hill order (e.g. "C34H38N6O7"), as an independent count of what is drawn — use it to double-check your own SMILES.
+- "confidence": how sure you are the SMILES matches the drawing.
+ONLY return numbered, final example/claimed compounds. SKIP synthetic intermediates, reagents, building blocks, starting materials, linkers on their own, protecting-group fragments, and reference/comparator compounds.
+If there is no such structure, return []. No text outside the JSON array.`;
+
+function fmtDur(s){ s=Math.max(0,Math.round(s)); const m=Math.floor(s/60),ss=s%60; return m?`${m}m ${ss<10?"0":""}${ss}s`:`${ss}s`; }
+const Progress={
+  t0:0, timer:null,
+  start(stage,detail){ this.t0=Date.now(); const el=$("#progress"); if(!el)return; el.hidden=false;
+    this.set(stage,null,detail||""); clearInterval(this.timer); this.timer=setInterval(()=>this._tick(),500); this._tick(); },
+  set(stage,frac,detail){ if($("#progStage"))$("#progStage").textContent=stage;
+    const f=$("#progFill"); if(f){ if(frac==null){ f.classList.add("indet"); f.style.width=""; }
+      else { f.classList.remove("indet"); f.style.width=Math.round(Math.min(1,Math.max(0,frac))*100)+"%"; } }
+    if(detail!=null && $("#progDetail")) $("#progDetail").textContent=detail; },
+  _tick(){ if($("#progTime"))$("#progTime").textContent=fmtDur((Date.now()-this.t0)/1000)+" elapsed"; },
+  stopBtn(on,fn){ const b=$("#progStop"); if(!b)return; b.hidden=!on; b.onclick=on?fn:null; },
+  done(){ clearInterval(this.timer); this.stopBtn(false); const f=$("#progFill"); if(f){f.classList.remove("indet");f.style.width="100%";}
+    if($("#progStage"))$("#progStage").textContent="Done"; setTimeout(()=>{ const el=$("#progress"); if(el)el.hidden=true; },1400); },
+  hide(){ clearInterval(this.timer); this.stopBtn(false); const el=$("#progress"); if(el)el.hidden=true; },
+};
+
+async function resolveClaude(){
+  try{
+    if(window.claude && typeof window.claude.use==="function"){
+      const s=await window.claude.use("sample");
+      if(s){ state.sample=s;
+        try{ const lim=await s.limits(); state.sampleImages=!!(lim&&lim.images); }catch(e){} }
+    }
+  }catch(e){}
+  updateClaudeUI();
+}
+function updateClaudeUI(){
+  const note=$("#claudeNote"), tools=$("#claudeTools"); if(!note||!tools) return;
+  const vw=$("#pdfVisionWrap"); if(vw){ vw.hidden=!(state.sample&&state.sampleImages); if(!vw.hidden) vw.style.display="flex"; }
+  if(state.sample && state.sampleImages){
+    tools.hidden=false;
+    note.textContent="Claude reads structure drawings into SMILES on your own Claude account — it asks your permission on first use.";
+  } else {
+    tools.hidden=true;
+    note.innerHTML=window.claude ? "Claude vision isn't available for this view (your account or organization hasn't enabled it for artifacts)."
+      : "This runs only in the published claude.ai artifact (where the page can call Claude). On a locally-served copy, use the paste/CSV routes or the OCSR backend instead.";
+  }
+}
+async function renderPdfPage(pdfDoc,n,scale){
+  const page=await pdfDoc.getPage(n);
+  const vp=page.getViewport({scale:scale||2});
+  const canvas=document.createElement("canvas"); canvas.width=Math.min(2200,vp.width); canvas.height=Math.round(canvas.width*vp.height/vp.width);
+  const sc=canvas.width/vp.width; const vp2=page.getViewport({scale:(scale||2)*sc});
+  const ctx=canvas.getContext("2d"); ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext:ctx,viewport:vp2}).promise;
+  return await new Promise(res=>canvas.toBlob(res,"image/png"));
+}
+function showPdfPagePicker(){
+  const wrap=$("#pdfPageWrap"); if(!wrap) return;
+  if(state.pdfDoc){ wrap.hidden=false; $("#pdfPageNo").max=state.pdfDoc.numPages;
+    $("#pdfPageNo").value=1; $("#pdfPageOf").textContent="of "+state.pdfDoc.numPages+" ("+state.pdfName+")"; }
+  else wrap.hidden=true;
+}
+function setClaudeBlob(blob,previewUrl){
+  state.claudeBlob=blob; const dz=$("#claudeDrop");
+  dz.innerHTML = blob ? `Image ready — <u>choose another</u><br><img src="${previewUrl}" alt="selected structure">`
+    : `Drop or paste a structure image, or <u>choose a file</u>.`;
+  dz.appendChild(Object.assign(document.createElement("input"),{type:"file",accept:"image/*",hidden:true,id:"claudeImgIn"}));
+  $("#claudeImgIn").onchange=onClaudeFile;
+  $("#claudeReadImg").disabled=!blob;
+}
+function onClaudeFile(e){ const f=e.target.files&&e.target.files[0]; if(f&&f.type.startsWith("image/")) setClaudeBlob(f,URL.createObjectURL(f)); }
+
+async function readWithClaude(blob,sourceLabel){
+  const st=$("#claudeStatus"), rev=$("#claudeReview");
+  if(!state.sample){ setStatus("Claude vision is not available in this view.",false); return; }
+  st.textContent="Reading with Claude… (up to a minute)"; rev.innerHTML="";
+  try{
+    const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:"complex"});
+    st.textContent="";
+    const items=(Array.isArray(arr)?arr:[]).map(o=>{ const raw=(o&&o.smiles||"").trim();
+      const canon=raw?withMol(raw,m=>m.get_smiles()):null;
+      return {id:(o&&o.id)||"", raw, smiles:canon||raw, valid:!!canon}; });
+    if(!items.length){ st.textContent="Claude did not find a chemical structure in that image."; return; }
+    renderReview(items, URL.createObjectURL(blob), sourceLabel);
+  }catch(e){ st.textContent="";
+    const msg={not_granted:"You declined Claude access (or it isn't enabled). ",rate_limited:"Claude is rate-limited — try again shortly. ",images_unavailable:"This view can't send images to Claude. ",refused:"Claude declined to read that image. ",invalid_json:"Claude's reply wasn't usable — try a cleaner crop. "}[e.code]||("Claude error: "+(e.message||e.code)+". ");
+    setStatus(msg,false); }
+}
+function renderReview(items, srcUrl, sourceLabel){
+  const rev=$("#claudeReview");
+  const head=`<p class="help" style="margin-top:10px">Recognised from <b>${esc(sourceLabel||"image")}</b> — compare each structure to the drawing, fix if needed, then add. <img class="review-src" src="${srcUrl}" alt="source"></p>`;
+  rev.innerHTML=head + items.map((it,i)=>`
+    <div class="rev" data-i="${i}">
+      <div class="revdep">${it.valid?depict({smiles:it.smiles,regionMap:null},{w:120,h:92,regions:false}):'<span class="help">not parsed</span>'}</div>
+      <div class="revbody">
+        <input class="revid" data-f="id" placeholder="compound id (optional)" value="${esc(it.id)}">
+        <input data-f="smi" spellcheck="false" value="${esc(it.smiles)}">
+      </div>
+      <div class="revact"><button class="btn small primary" data-a="add">Add</button><button class="btn small" data-a="skip">Skip</button></div>
+    </div>`).join("");
+  rev.querySelectorAll(".rev").forEach(card=>{
+    const smi=card.querySelector('[data-f="smi"]'), dep=card.querySelector(".revdep");
+    smi.oninput=()=>{ const c=withMol(smi.value.trim(),m=>m.get_smiles()); dep.innerHTML=c?depict({smiles:c,regionMap:null},{w:120,h:92,regions:false}):'<span class="help">invalid</span>'; };
+    card.querySelector('[data-a="skip"]').onclick=()=>card.remove();
+    card.querySelector('[data-a="add"]').onclick=()=>{
+      const id=card.querySelector('[data-f="id"]').value.trim()||("Claude-"+(state.compounds.length+1));
+      const r=addCompounds([{id,name:id,series:"Claude-read (verify)",smiles:smi.value.trim(),data:{}}]);
+      card.querySelector('.revact').innerHTML = r.added? '<span style="color:var(--ok);font-size:12px">Added ✓</span>' : '<span style="color:var(--bad);font-size:12px">Invalid</span>';
+    };
+  });
+}
+
+/* ============================ wiring ============================ */
+function setWarhead(smarts){
+  state.warheadSmarts=smarts||""; if(state.warheadQmol){state.warheadQmol.delete();state.warheadQmol=null;}
+  if(smarts){ const q=state.rdkit.get_qmol(smarts); if(q&&q.is_valid())state.warheadQmol=q; else if(q)q.delete(); }
+  // re-analyse all (keep raw id/name/series/smiles/data)
+  state.compounds=state.compounds.map(c=>analyse({id:c.id,name:c.name,series:c.series,smiles:c.smiles,data:c.data}));
+  refreshAll();
+}
+function refreshAll(){
+  const valid=state.compounds.filter(c=>c.valid).length;
+  const dataOnly=state.compounds.filter(c=>c.dataOnly).length;
+  const bad=state.compounds.length-valid-dataOnly;
+  $("#nValid").textContent=valid;
+  $("#nBad").innerHTML=(bad?`· <span style="color:var(--bad)">${bad} invalid</span>`:"")+(dataOnly?` · <span style="color:var(--muted)">${dataOnly} data-only</span>`:"");
+  const nReview=state.compounds.filter(c=>c.needsReview).length;
+  if(nReview) $("#nBad").innerHTML += ` · <span style="color:var(--warn)">⚠ ${nReview} to review</span>`;
+  if(!state.selectedId||!state.compounds.find(c=>c.id===state.selectedId)){ const f=state.compounds.find(c=>c.valid); state.selectedId=f?f.id:null; }
+  renderTargets(); renderChips(); renderGallery(); renderDetail(); renderChartControls(); renderChart(); renderTable();
+}
+function renderTargets(){ const el=$("#poiBanner"); if(!el) return;
+  if(!state.detectedTargets.length){ el.hidden=true; return; }
+  el.hidden=false;
+  el.innerHTML=`<div class="status ok" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Target (POI):</b> ${state.detectedTargets.map(t=>`<span class="badge" style="background:var(--accent-soft);color:var(--accent)">${esc(t)}</span>`).join(" ")}<button class="btn small" id="clearPoi" style="margin-left:auto">clear</button></div>`;
+  $("#clearPoi").onclick=()=>{ state.detectedTargets=[]; renderTargets(); };
+}
+function select(id){ state.selectedId=id; renderGallery(); renderDetail(); renderTable(); }
+function switchTab(t){ state.tab=t; store.set("dl.tab",t);
+  $$(".tab").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===t));
+  ["compound","sar","table","data"].forEach(p=>$("#pane-"+p).hidden=(p!==t));
+  if(t==="sar") renderChart(); if(t==="table") renderTable();
+}
+function getTheme(){ const a=document.documentElement.getAttribute("data-theme"); if(a)return a;
+  return matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }
+function applyTheme(t){ if(t)document.documentElement.setAttribute("data-theme",t); store.set("dl.theme",t);
+  renderGallery(); renderDetail(); renderChart(); }
+
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function trim(v){ const n=+v; return Math.abs(n)>=1000? n.toExponential(1) : (Math.round(n*100)/100).toString(); }
+function sci(v){ if(v>=1000||v<0.01)return (+v).toExponential(0); return (Math.round(v*100)/100).toString(); }
+function niceTicks(lo,hi,n){ const span=hi-lo, step0=span/n, mag=Math.pow(10,Math.floor(Math.log10(step0))); const norm=step0/mag;
+  const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag; const start=Math.ceil(lo/step)*step; const out=[];
+  for(let v=start;v<=hi+1e-9;v+=step)out.push(+v.toFixed(10)); return out; }
+function pearson(a,b){ const n=a.length,ma=a.reduce((x,y)=>x+y,0)/n,mb=b.reduce((x,y)=>x+y,0)/n; let num=0,da=0,db=0;
+  for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;num+=x*y;da+=x*x;db+=y*y;} return (da&&db)?num/Math.sqrt(da*db):0; }
+
+async function copyText(text,btn){ const old=btn.textContent;
+  try{ await navigator.clipboard.writeText(text); btn.textContent="Copied ✓"; }
+  catch(e){ const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");btn.textContent="Copied ✓";}catch(_){btn.textContent="Copy failed";}ta.remove(); }
+  setTimeout(()=>btn.textContent=old,1400); }
+
+function setStatus(msg,ok=true){ $("#dataStatus").innerHTML=`<div class="status ${ok?"ok":"err"}">${esc(msg)}</div>`; }
+
+function bindUI(){
+  $("#btnTheme").onclick=()=>{ applyTheme(getTheme()==="dark"?"light":"dark"); };
+  $$(".tab").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+  const q=$("#q"); q.oninput=()=>{ state.query=q.value; renderGallery(); }; $("#qClear").onclick=()=>{ q.value="";state.query="";renderGallery(); };
+  $("#warheadIn").value=state.warheadSmarts;
+  $("#applyWarhead").onclick=()=>{ const v=$("#warheadIn").value.trim(); const test=state.rdkit.get_qmol(v); const ok=test&&test.is_valid(); if(test)test.delete();
+    if(!v||!ok){ setStatus("Invalid SMARTS pattern.",false); return; } setWarhead(v); setStatus("Warhead scaffold applied — degraders re-decomposed into warhead · linker · E3 ligand."); };
+  $("#clearWarhead").onclick=()=>{ setWarhead(""); $("#warheadIn").value=""; setStatus("Warhead scaffold cleared. E3 ligand is still detected automatically; linker shown only where resolvable."); };
+  $("#parseBtn").onclick=()=>doParse(false);
+  $("#replaceBtn").onclick=()=>doParse(true);
+  $("#loadSample").onclick=()=>{ setWarhead(DEFAULT_WARHEAD); $("#warheadIn").value=DEFAULT_WARHEAD; const r=addCompounds(sampleRows(),{replace:true}); setStatus(`Loaded ${r.added} sample compounds.`); };
+  const ou=$("#ocsrUrl"), oon=$("#ocsrOn");
+  if(ou){ ou.value=store.get("dl.ocsrUrl")||""; ou.onchange=()=>store.set("dl.ocsrUrl",ou.value.trim()); }
+  if(oon){ oon.checked=store.get("dl.ocsrOn")==="1"; oon.onchange=()=>store.set("dl.ocsrOn",oon.checked?"1":"0"); }
+  const ku=$("#keepUnnum"); if(ku){ ku.checked=state.keepUnnumbered=(store.get("dl.keepUnnum")==="1"); ku.onchange=()=>{ state.keepUnnumbered=ku.checked; store.set("dl.keepUnnum",ku.checked?"1":"0"); }; }
+  $("#pdfIn").onchange=e=>{ const f=e.target.files[0]; if(f) extractFromPDF(f); e.target.value=""; };
+  // Claude vision OCSR controls
+  const dz=$("#claudeDrop");
+  if(dz){
+    dz.onclick=()=>$("#claudeImgIn")&&$("#claudeImgIn").click();
+    $("#claudeImgIn").onchange=onClaudeFile;
+    dz.ondragover=e=>{e.preventDefault();dz.classList.add("drag");};
+    dz.ondragleave=()=>dz.classList.remove("drag");
+    dz.ondrop=e=>{e.preventDefault();dz.classList.remove("drag"); const f=[...(e.dataTransfer.files||[])].find(x=>x.type.startsWith("image/")); if(f) setClaudeBlob(f,URL.createObjectURL(f));};
+    dz.onpaste=e=>{ const it=[...(e.clipboardData.items||[])].find(x=>x.type.startsWith("image/")); if(it){ const f=it.getAsFile(); if(f) setClaudeBlob(f,URL.createObjectURL(f)); } };
+    $("#claudeReadImg").onclick=()=>{ if(state.claudeBlob) readWithClaude(state.claudeBlob,"uploaded image"); };
+    $("#claudeReadPage").onclick=async()=>{ if(!state.pdfDoc)return; const n=Math.max(1,Math.min(state.pdfDoc.numPages,+$("#pdfPageNo").value||1));
+      $("#claudeStatus").textContent="Rendering page "+n+"…";
+      try{ const blob=await renderPdfPage(state.pdfDoc,n); await readWithClaude(blob,"page "+n+" of "+state.pdfName); }
+      catch(e){ $("#claudeStatus").textContent="Could not render that page: "+e.message; } };
+  }
+  $("#patentBtn").onclick=()=>{ const txt=$("#patentArea").value; const rows=extractPatentRecords(txt); if(!rows.length){setStatus("No compound identifiers or assay values found in the text.",false);return;}
+    const tg=detectTargets(txt); if(tg.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tg])]; renderTargets(); }
+    const r=addCompounds(rows); setStatus(`Text: extracted ${rows.length} record(s) — ${r.added} with structure, merged onto ${r.merged}, ${r.dataOnly} data-only${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}.`); };
+  $("#fileIn").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const name=f.name.toLowerCase();
+    const rd=new FileReader();
+    const done=rows=>{ const r=addCompounds(rows); setStatus(`${f.name}: added ${r.added}, merged ${r.merged}, ${r.dataOnly} data-only${r.bad?`, ${r.bad} invalid`:""}.`,r.bad===0); };
+    if(name.endsWith(".xlsx")||name.endsWith(".xls")){
+      if(!window.XLSX){ setStatus("Excel reader didn’t load — reconnect and reload, or export the sheet as CSV.",false); e.target.value=""; return; }
+      rd.onload=()=>done(parseXLSX(rd.result)); rd.readAsArrayBuffer(f);
+    } else {
+      rd.onload=()=>{ const t=rd.result;
+        let rows; if(name.endsWith(".sdf")||name.endsWith(".mol"))rows=parseSDF(t);
+        else if(name.endsWith(".smi"))rows=parseSmilesList(t); else rows=parseCSV(t);
+        done(rows); };
+      rd.readAsText(f);
+    }
+    e.target.value=""; };
+  $("#copyCsv").onclick=e=>copyText(toCSV(),e.currentTarget);
+  $("#copySmi").onclick=e=>copyText(state.compounds.filter(c=>c.valid).map(c=>c.smiles+" "+c.id).join("\n"),e.currentTarget);
+}
+function doParse(replace){
+  const fmt=$("#fmt").value, text=$("#pasteArea").value; if(!text.trim()){setStatus("Nothing to parse — paste data first.",false);return;}
+  let rows; try{ rows = fmt==="csv"?parseCSV(text):fmt==="smiles"?parseSmilesList(text):parseSDF(text); }
+  catch(e){ setStatus("Parse error: "+e.message,false); return; }
+  if(!rows.length){setStatus("No rows found. Check the format selection.",false);return;}
+  const r=addCompounds(rows,{replace}); setStatus(`${replace?"Replaced with":"Added"} ${r.added} compound(s)${r.bad?`, ${r.bad} invalid`:""}${r.merged?`, merged data onto ${r.merged}`:""}${r.dataOnly?`, ${r.dataOnly} data-only`:""}.`,r.bad===0);
+}
+
+/* ============================ boot ============================ */
+function boot(){
+  if(window.pdfjsLib){ try{ pdfjsLib.GlobalWorkerOptions.workerSrc="./pdf.worker.min.js"; }catch(e){} }
+  state.qmolAnchors=E3_ANCHORS.map(a=>{ const q=state.rdkit.get_qmol(a.smarts); return (q&&q.is_valid())?q:null; });
+  setWarhead(""); // v2: blank landing, no preloaded compounds (loadSample sets the scaffold)
+  bindUI();
+  const th=store.get("dl.theme"); if(th)document.documentElement.setAttribute("data-theme",th);
+  switchTab("data"); // the PDF-upload view is the landing
+  $("#boot").hidden=true; $("#app").hidden=false;
+  resolveClaude();
+}
+window.addEventListener("DOMContentLoaded",()=>{
+  if(typeof initRDKitModule!=="function"){ $("#bootmsg").textContent="Could not load the chemistry engine (offline?). Reconnect and reload."; return; }
+  initRDKitModule({ locateFile:()=>"./RDKit_minimal.wasm" })
+    .then(rk=>{ state.rdkit=rk; try{ boot(); }catch(e){ $("#bootmsg").textContent="Startup error: "+e.message; console.error(e); } })
+    .catch(e=>{ $("#bootmsg").textContent="Chemistry engine failed to initialise: "+e.message; console.error(e); });
+});
+</script>

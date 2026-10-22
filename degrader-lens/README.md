@@ -40,6 +40,14 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 ## Two versions
 
 - **`index.html`** — the original: opens with a loaded sample dataset.
+- **`index-v3.html`** — v2 plus: **automatic scaffold-free decomposition** (warhead/
+  linker/E3 split and linker length populate for any PROTAC, no scaffold needed),
+  **target (POI) detection** from the document text, **tidy-up** that keeps only
+  numbered final compounds (drops intermediates/building blocks), and **OCSR
+  accuracy checks** — each Claude-read structure returns a molecular formula and a
+  confidence; a formula mismatch or low confidence flags it "needs review" (with a
+  filter and badges), and a per-compound "re-check with Claude" re-verifies it
+  against the drawing.
 - **`index-v2.html`** — a blank landing built around dropping in a document. No
   preloaded data; works on **patents and papers**; accepts **CSV / Excel (.xlsx) /
   SDF / SMILES**; and on a PDF it does a **two-pass focused scan** — a quick text
