@@ -1213,10 +1213,18 @@ async function extractFromPDFClient(file){
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
     state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
-    let text=""; const pageTexts=[];
-    for(let p=1;p<=pdf.numPages;p++){ Progress.set("Reading text", p/pdf.numPages, `page ${p} / ${pdf.numPages}`);
+    let text=""; const pageTexts=[]; let lastAdd=0;
+    for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p); const tc=await page.getTextContent();
-      const pt=tc.items.map(i=>i.str).join(" "); pageTexts.push(pt); text+=pt+"\n"; if(page.cleanup)page.cleanup(); }
+      const pt=tc.items.map(i=>i.str).join(" "); pageTexts.push(pt); text+=pt+"\n"; if(page.cleanup)page.cleanup();
+      // Biological data first: as pages come in, pull the assay records and populate by compound
+      // number, so the Table / SAR fill in live while the (slower) structures are read afterward.
+      if(p-lastAdd>=5 && p!==pdf.numPages){ lastAdd=p;
+        const recs=extractPatentRecords(text); if(recs.length) addCompounds(recs);
+        const tgp=detectTargets(text); if(tgp.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tgp])]; renderTargets(); }
+        await new Promise(requestAnimationFrame); }
+      Progress.set("Reading biological data", p/pdf.numPages, `page ${p} / ${pdf.numPages} · ${state.compounds.length} compound(s) so far`);
+    }
     const rows=extractPatentRecords(text);
     const tg=detectTargets(text); if(tg.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tg])]; renderTargets(); }
     const withStruct=rows.filter(r=>r.smiles).length;
@@ -1320,9 +1328,9 @@ async function findStructurePages(pdf, pageTexts, range, ctl){
 }
 async function visionScanPdf(pdf, pages, ctl){
   if(!pages || !pages.length || (ctl&&ctl.signal.aborted)) return {scanned:0,found:0};
-  const t0=Date.now(); let done=0,found=0,stopped=false,rateLimited=false;
-  const update=()=>{ let eta=done>0 ? " · ~"+fmtDur((Date.now()-t0)/done*(pages.length-done)/1000)+" left" : " · estimating…";
-    Progress.set("Reading structures with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} found${ctl.signal.aborted?"":eta}`); };
+  const t0=Date.now(); Progress.t0=t0; let done=0,found=0,stopped=false,rateLimited=false;
+  // time-left is shown by Progress from the fraction; keep the detail line to page / found counts.
+  const update=()=>{ Progress.set("Reading structures with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} structure(s) found`); };
   update();
   const worker=async(p)=>{
     if(ctl.signal.aborted) return;
@@ -1355,14 +1363,20 @@ If there is no such structure, return []. No text outside the JSON array.`;
 
 function fmtDur(s){ s=Math.max(0,Math.round(s)); const m=Math.floor(s/60),ss=s%60; return m?`${m}m ${ss<10?"0":""}${ss}s`:`${ss}s`; }
 const Progress={
-  t0:0, timer:null,
-  start(stage,detail){ this.t0=Date.now(); const el=$("#progress"); if(!el)return; el.hidden=false;
+  t0:0, timer:null, frac:null,
+  start(stage,detail){ this.t0=Date.now(); this.frac=null; const el=$("#progress"); if(!el)return; el.hidden=false;
     this.set(stage,null,detail||""); clearInterval(this.timer); this.timer=setInterval(()=>this._tick(),500); this._tick(); },
   set(stage,frac,detail){ if($("#progStage"))$("#progStage").textContent=stage;
+    this.frac = (frac==null? null : Math.min(1,Math.max(0,frac)));
     const f=$("#progFill"); if(f){ if(frac==null){ f.classList.add("indet"); f.style.width=""; }
-      else { f.classList.remove("indet"); f.style.width=Math.round(Math.min(1,Math.max(0,frac))*100)+"%"; } }
-    if(detail!=null && $("#progDetail")) $("#progDetail").textContent=detail; },
-  _tick(){ if($("#progTime"))$("#progTime").textContent=fmtDur((Date.now()-this.t0)/1000)+" elapsed"; },
+      else { f.classList.remove("indet"); f.style.width=Math.round(this.frac*100)+"%"; } }
+    if(detail!=null && $("#progDetail")) $("#progDetail").textContent=detail; this._tick(); },
+  // progTime shows elapsed time and, once a determinate fraction is known, a live estimate of time left.
+  _tick(){ const te=$("#progTime"); if(!te) return; const el=(Date.now()-this.t0)/1000;
+    let s=fmtDur(el)+" elapsed";
+    if(this.frac!=null){ if(this.frac>0.03 && this.frac<1) s+=" · ~"+fmtDur(el/this.frac*(1-this.frac))+" left";
+      else if(this.frac<=0.03) s+=" · estimating…"; }
+    te.textContent=s; },
   stopBtn(on,fn){ const b=$("#progStop"); if(!b)return; b.hidden=!on; b.onclick=on?fn:null; },
   done(){ clearInterval(this.timer); this.stopBtn(false); const f=$("#progFill"); if(f){f.classList.remove("indet");f.style.width="100%";}
     if($("#progStage"))$("#progStage").textContent="Done"; setTimeout(()=>{ const el=$("#progress"); if(el)el.hidden=true; },1400); },
