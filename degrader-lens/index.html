@@ -171,6 +171,15 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .status.err{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
 .help{font-size:12px;color:var(--muted);line-height:1.55}
 .help code{font-family:var(--f-mono);background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+#progress{border:1px solid var(--accent);border-radius:10px;padding:12px 14px;background:var(--accent-soft);margin-bottom:14px}
+.prog-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13.5px;font-weight:600;margin-bottom:9px}
+.prog-head #progTime{color:var(--muted);font-weight:500;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.prog-bar{height:8px;border-radius:999px;background:color-mix(in srgb,var(--accent) 22%,transparent);overflow:hidden;position:relative}
+#progFill{height:100%;width:0%;background:var(--accent);border-radius:999px;transition:width .45s ease}
+#progFill.indet{position:absolute;width:38%;animation:indet 1.15s ease-in-out infinite}
+@keyframes indet{0%{left:-40%}100%{left:100%}}
+.prog-sub{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){#progFill.indet{animation:none;left:0;width:100%;opacity:.5}}
 .dropzone{border:1.5px dashed var(--line);border-radius:8px;padding:16px;text-align:center;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--panel-2)}
 .dropzone:hover,.dropzone.drag{border-color:var(--accent);color:var(--ink)}
 .dropzone u{color:var(--accent)}
@@ -267,22 +276,51 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <div class="note" id="tableNote"></div>
       </div>
 
-      <div class="pane" id="pane-data" role="tabpanel" hidden>
-        <h2>Load &amp; extract compounds</h2>
-        <p class="sub">The structure engine runs entirely in your browser (RDKit WebAssembly). Nothing is uploaded.</p>
+      <div class="pane" id="pane-data" role="tabpanel">
+        <h2>Drop in a patent PDF</h2>
+        <p class="sub">Structures and data come out together — read in your browser (RDKit WebAssembly). Nothing is uploaded.</p>
+
+        <div id="progress" hidden>
+          <div class="prog-head"><span id="progStage">Working…</span><span id="progTime"></span></div>
+          <div class="prog-bar"><div id="progFill"></div></div>
+          <div class="prog-sub"><span id="progDetail"></span><button class="btn small" id="progStop" hidden>Stop</button></div>
+        </div>
 
         <section class="block">
-          <h3>Shared warhead / target-ligand scaffold</h3>
-          <p class="help">A SMARTS pattern for the common target-binding scaffold lets the tool split each degrader into <b>warhead · linker · E3 ligand</b> exactly and run region-based SAR. The E3 ligand is always detected automatically.</p>
-          <div class="inline" style="margin-top:7px">
-            <input type="text" id="warheadIn" placeholder="e.g. O=C(c1ccccc1)Nc1ccccc1" spellcheck="false">
-            <button class="btn small primary" id="applyWarhead">Apply</button>
-            <button class="btn small" id="clearWarhead">Auto-estimate only</button>
+          <p class="help"><b>Upload a patent PDF</b> and the tool reads every page: <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b>, and any machine-readable <b>SMILES</b> in tables or the SI (each validated with RDKit). With <b>“read drawn structures too”</b> ticked, it also finds the pages with drawings, has Claude read each one into a SMILES, and <b>merges every structure onto its compound by example number</b>.</p>
+          <div class="inline" style="margin-top:9px">
+            <label class="btn primary" style="cursor:pointer">Upload patent PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
+            <label id="pdfVisionWrap" hidden style="gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision" checked> read drawn structures too (Claude)</label>
+          </div>
+          <div class="datarow" style="margin-top:10px">
+            <p class="help" style="margin:0">…or paste a text excerpt from a patent:</p>
+            <textarea id="patentArea" spellcheck="false" placeholder="Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
+            <div class="inline"><button class="btn small primary" id="patentBtn">Extract from pasted text</button></div>
+          </div>
+        </section>
+
+        <section class="block" id="claudeSec">
+          <h3>Read a single drawing with Claude</h3>
+          <p class="help" id="claudeNote">Checking whether Claude vision is available here…</p>
+          <div id="claudeTools" hidden>
+            <p class="help" style="margin-bottom:7px">The PDF upload above reads drawings automatically. Use this to read one snipped structure, or re-read a single page, and <b>check it before adding</b> — vision OCSR is a strong assist, not guaranteed correct on complex degraders.</p>
+            <div class="dropzone" id="claudeDrop" tabindex="0">Drop or paste a structure image, or <u>choose a file</u>.<input type="file" id="claudeImgIn" accept="image/*" hidden></div>
+            <div class="inline" style="margin-top:7px">
+              <button class="btn small primary" id="claudeReadImg" disabled>Read image with Claude</button>
+              <span id="pdfPageWrap" hidden class="inline" style="gap:5px">
+                <span class="help">or render page</span>
+                <input type="number" id="pdfPageNo" min="1" value="1" style="width:60px;border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:4px 6px;font:12px var(--f-mono)">
+                <span class="help" id="pdfPageOf"></span>
+                <button class="btn small" id="claudeReadPage">Read PDF page</button>
+              </span>
+              <span id="claudeStatus" class="help"></span>
+            </div>
+            <div id="claudeReview"></div>
           </div>
         </section>
 
         <section class="block">
-          <h3>Paste data</h3>
+          <h3>Paste or upload a dataset</h3>
           <div class="datarow">
             <div class="inline">
               <div class="field"><label for="fmt">Format</label>
@@ -299,48 +337,22 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
           </div>
           <div class="inline">
             <label class="btn small" style="cursor:pointer">Upload file…<input type="file" id="fileIn" accept=".csv,.tsv,.smi,.txt,.sdf,.mol" hidden></label>
-            <button class="btn small" id="loadSample">Reload sample set</button>
+            <button class="btn small" id="loadSample">Load sample set</button>
           </div>
         </section>
 
         <section class="block">
-          <h3>Extract from a patent</h3>
-          <p class="help"><b>Upload a patent PDF</b> and the tool reads every page: it pulls <b>compound identifiers</b>, reported <b>IC<sub>50</sub> / DC<sub>50</sub> / D<sub>max</sub></b> values, and any machine-readable <b>SMILES</b> in tables or the SI (each validated with RDKit). With <b>“read drawn structures too”</b> ticked, it then finds the pages with structure drawings, has Claude read each one into a SMILES, and <b>merges every structure onto its compound by example number</b> — one upload, structures and data together. You can also paste a text excerpt instead.</p>
-          <div class="datarow">
-            <div class="inline">
-              <label class="btn small primary" style="cursor:pointer">Upload patent PDF…<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
-              <label id="pdfVisionWrap" hidden style="gap:5px;align-items:center;font-size:12px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfVision" checked> read drawn structures too (Claude)</label>
-              <button class="btn small" id="patentBtn">Extract from pasted text</button>
-              <button class="btn small" id="visionStop" hidden>Stop reading</button>
-              <span id="pdfProgress" class="help"></span>
-            </div>
-            <textarea id="patentArea" spellcheck="false" placeholder="…or paste an excerpt: Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
-          </div>
-          <p class="help" style="margin-top:4px"><b>Drawn structures that appear only as images</b> are not auto-recognised in the browser: converting a picture to SMILES needs optical chemical-structure recognition (<code>DECIMER</code> / <code>MolScribe</code>). Two routes: run the bundled <code>tools/patent_to_csv.py</code> companion and load its CSV here, or point the uploader at a self-hosted OCSR backend (<code>server/app.py</code>) below.</p>
+          <h3>Advanced</h3>
+          <p class="help"><b>Warhead / target-ligand scaffold.</b> A SMARTS pattern for the common target-binding scaffold splits each degrader into <b>warhead · linker · E3 ligand</b> exactly for region-based SAR. The E3 ligand is always detected automatically.</p>
           <div class="inline" style="margin-top:7px">
-            <input type="text" id="ocsrUrl" placeholder="OCSR server URL (self-hosted, optional), e.g. http://localhost:8000" spellcheck="false">
-            <label style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="ocsrOn"> run OCSR on the server</label>
+            <input type="text" id="warheadIn" placeholder="e.g. O=C(c1ccccc1)Nc1ccccc1" spellcheck="false">
+            <button class="btn small primary" id="applyWarhead">Apply</button>
+            <button class="btn small" id="clearWarhead">Auto-estimate only</button>
           </div>
-          <p class="help" style="margin-top:4px">When a server URL is set, uploads are sent there for full text + OCSR extraction. This needs the page to be <b>self-hosted</b> — the claude.ai artifact sandbox blocks outbound requests, so there it stays text/SMILES only.</p>
-        </section>
-
-        <section class="block" id="claudeSec">
-          <h3>Read drawn structures with Claude (in-browser)</h3>
-          <p class="help" id="claudeNote">Checking whether Claude vision is available here…</p>
-          <div id="claudeTools" hidden>
-            <p class="help" style="margin-bottom:7px">Snip one or a few structure drawings from the patent (or render a page below) and Claude reads them into SMILES — no install. Each result is validated with RDKit and shown next to the drawing for you to <b>check before adding</b>: vision OCSR is a strong assist, not guaranteed correct on complex degraders.</p>
-            <div class="dropzone" id="claudeDrop" tabindex="0">Drop or paste a structure image, or <u>choose a file</u>.<input type="file" id="claudeImgIn" accept="image/*" hidden></div>
-            <div class="inline" style="margin-top:7px">
-              <button class="btn small primary" id="claudeReadImg" disabled>Read image with Claude</button>
-              <span id="pdfPageWrap" hidden class="inline" style="gap:5px">
-                <span class="help">or render page</span>
-                <input type="number" id="pdfPageNo" min="1" value="1" style="width:60px;border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:4px 6px;font:12px var(--f-mono)">
-                <span class="help" id="pdfPageOf"></span>
-                <button class="btn small" id="claudeReadPage">Read PDF page</button>
-              </span>
-              <span id="claudeStatus" class="help"></span>
-            </div>
-            <div id="claudeReview"></div>
+          <p class="help" style="margin-top:10px"><b>Self-hosted OCSR backend (optional).</b> Point uploads at a <code>server/app.py</code> instance for full server-side OCSR (needs the page self-hosted — the claude.ai artifact blocks outbound requests). A local <code>tools/patent_to_csv.py</code> companion can also write a CSV to load above.</p>
+          <div class="inline" style="margin-top:7px">
+            <input type="text" id="ocsrUrl" placeholder="OCSR server URL, e.g. http://localhost:8000" spellcheck="false">
+            <label style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="ocsrOn"> run OCSR on the server</label>
           </div>
         </section>
 
@@ -883,12 +895,12 @@ async function extractFromPDF(file){
   return extractFromPDFClient(file);
 }
 async function extractViaServer(file,url,ocsr){
-  const prog=$("#pdfProgress"); prog.textContent="Sending "+file.name+" to OCSR server…";
+  Progress.start("Uploading to OCSR server", esc(file.name));
   try{
     const fd=new FormData(); fd.append("pdf",file); fd.append("ocsr",ocsr?"1":"0");
     const res=await fetch(url.replace(/\/+$/,"")+"/extract",{method:"POST",body:fd});
     if(!res.ok) throw new Error("server returned "+res.status);
-    const j=await res.json(); prog.textContent="";
+    const j=await res.json(); Progress.done();
     const rows=(j.records||[]).map(r=>({id:r.id,name:r.id,
       series:(r.source||"").includes("ocsr")?"patent (OCSR)":"patent",
       smiles:r.smiles||"",data:r.data||{}}));
@@ -896,29 +908,26 @@ async function extractViaServer(file,url,ocsr){
     const withS=rows.filter(r=>r.smiles).length, rr=addCompounds(rows);
     const extra=j.ocsr_used?" OCSR recovered drawn structures." : (ocsr&&j.ocsr_error?` Server OCSR unavailable (${esc(j.ocsr_error)}).`:"");
     setStatus(`${esc(j.filename||file.name)} via server: ${j.pages} pages → ${rows.length} records (${withS} with SMILES). Added ${rr.added}, merged ${rr.merged}, ${rr.dataOnly} data-only.${extra}`, rr.bad===0);
-  }catch(e){ prog.textContent="";
+  }catch(e){ Progress.hide();
     setStatus("OCSR server unreachable ("+e.message+") — using in-browser text extraction instead.",false);
     return extractFromPDFClient(file); }
 }
 async function extractFromPDFClient(file){
-  const prog=$("#pdfProgress");
   if(!window.pdfjsLib){ setStatus("PDF reader did not load — reload the page and try again.",false); return; }
-  prog.textContent="Reading "+file.name+"…";
+  Progress.start("Reading PDF", "opening "+file.name);
   try{
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
     state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
     let text="";
-    for(let p=1;p<=pdf.numPages;p++){ prog.textContent=`Reading text, page ${p} / ${pdf.numPages}…`;
+    for(let p=1;p<=pdf.numPages;p++){ Progress.set("Reading text", p/pdf.numPages, `page ${p} / ${pdf.numPages}`);
       const page=await pdf.getPage(p); const tc=await page.getTextContent();
       text += tc.items.map(i=>i.str).join(" ")+"\n"; if(page.cleanup)page.cleanup(); }
-    prog.textContent="";
     const rows=extractPatentRecords(text);
     const withStruct=rows.filter(r=>r.smiles).length;
     const r=rows.length?addCompounds(rows):{added:0,merged:0,dataOnly:0,bad:0};
-    const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
     let msg=`${esc(file.name)}: ${pdf.numPages} pages → ${rows.length} text record(s) (${withStruct} with SMILES). Added ${r.added}, ${r.dataOnly} data-only.`;
-    setStatus(msg + (visionOn?" Now reading drawn structures…":""), true);
+    const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
     if(visionOn){
       const v=await visionScanPdf(pdf);
       if(v.scanned) msg+=` Claude read ${v.found} structure(s) from ${v.scanned} drawing page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. Check the “Claude-read” compounds against the drawings.`;
@@ -926,8 +935,8 @@ async function extractFromPDFClient(file){
     } else if(!rows.length){
       msg=`Read ${pdf.numPages} page(s) of ${esc(file.name)} but found no text records. If the structures are drawings, tick “read drawn structures too”${state.sample?"":" (available in the claude.ai artifact)"} and re-upload.`;
     }
-    setStatus(msg, r.bad===0);
-  }catch(e){ prog.textContent=""; setStatus("PDF error: "+e.message,false); }
+    Progress.done(); setStatus(msg, r.bad===0);
+  }catch(e){ Progress.hide(); setStatus("PDF error: "+e.message,false); }
 }
 function normId(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
 async function pageHasGraphics(pdf,n){
@@ -958,13 +967,15 @@ function mergeVisionStructure(vid,vsmiles){
   return 1;
 }
 async function visionScanPdf(pdf){
-  const prog=$("#pdfProgress"), stop=$("#visionStop");
-  prog.textContent="Finding pages with structure drawings…";
+  Progress.set("Finding structure drawings", null, "scanning pages…");
   const pages=[]; for(let p=1;p<=pdf.numPages;p++){ if(await pageHasGraphics(pdf,p)) pages.push(p); }
-  if(!pages.length){ prog.textContent=""; return {scanned:0,found:0}; }
+  if(!pages.length) return {scanned:0,found:0};
   const ctl=new AbortController(); state.visionAbort=ctl;
-  stop.hidden=false; stop.onclick=()=>ctl.abort();
-  let done=0,found=0,stopped=false,rateLimited=false;
+  Progress.stopBtn(true, ()=>ctl.abort());
+  const t0=Date.now(); let done=0,found=0,stopped=false,rateLimited=false;
+  const update=()=>{ let eta=done>0 ? " · ~"+fmtDur((Date.now()-t0)/done*(pages.length-done)/1000)+" left" : " · estimating…";
+    Progress.set("Reading structures with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} found${ctl.signal.aborted?"":eta}`); };
+  update();
   const worker=async(p)=>{
     if(ctl.signal.aborted) return;
     try{
@@ -974,11 +985,11 @@ async function visionScanPdf(pdf){
       refreshAll();
     }catch(e){ if(e.code==="cancelled"){stopped=true;} else if(e.code==="rate_limited"){rateLimited=true;ctl.abort();}
       else if(e.code==="not_granted"||e.code==="sampling_disabled"){stopped=true;ctl.abort();} }
-    done++; if(!ctl.signal.aborted) prog.textContent=`Reading structures with Claude… ${done}/${pages.length} pages (${found} found)`;
+    done++; update();
   };
   const queue=[...pages]; const run=async()=>{ while(queue.length && !ctl.signal.aborted){ await worker(queue.shift()); } };
   await Promise.all([run(),run()]); // small concurrency to respect rate limits
-  stop.hidden=true; state.visionAbort=null; prog.textContent="";
+  Progress.stopBtn(false); state.visionAbort=null;
   return {scanned:pages.length, found, stopped, rateLimited};
 }
 
@@ -990,6 +1001,22 @@ Return ONLY a JSON array, one element per distinct drawn chemical structure:
 - "smiles": one valid SMILES for that structure. Include stereochemistry (@, @@, / , \\) where it is drawn. Expand only abbreviations you are sure of (e.g. Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see.
 - "id": the compound label printed beside it if visible (e.g. "Example 12", "Compound 7"), else null.
 If there is no chemical structure, return []. No text outside the JSON array.`;
+
+function fmtDur(s){ s=Math.max(0,Math.round(s)); const m=Math.floor(s/60),ss=s%60; return m?`${m}m ${ss<10?"0":""}${ss}s`:`${ss}s`; }
+const Progress={
+  t0:0, timer:null,
+  start(stage,detail){ this.t0=Date.now(); const el=$("#progress"); if(!el)return; el.hidden=false;
+    this.set(stage,null,detail||""); clearInterval(this.timer); this.timer=setInterval(()=>this._tick(),500); this._tick(); },
+  set(stage,frac,detail){ if($("#progStage"))$("#progStage").textContent=stage;
+    const f=$("#progFill"); if(f){ if(frac==null){ f.classList.add("indet"); f.style.width=""; }
+      else { f.classList.remove("indet"); f.style.width=Math.round(Math.min(1,Math.max(0,frac))*100)+"%"; } }
+    if(detail!=null && $("#progDetail")) $("#progDetail").textContent=detail; },
+  _tick(){ if($("#progTime"))$("#progTime").textContent=fmtDur((Date.now()-this.t0)/1000)+" elapsed"; },
+  stopBtn(on,fn){ const b=$("#progStop"); if(!b)return; b.hidden=!on; b.onclick=on?fn:null; },
+  done(){ clearInterval(this.timer); this.stopBtn(false); const f=$("#progFill"); if(f){f.classList.remove("indet");f.style.width="100%";}
+    if($("#progStage"))$("#progStage").textContent="Done"; setTimeout(()=>{ const el=$("#progress"); if(el)el.hidden=true; },1400); },
+  hide(){ clearInterval(this.timer); this.stopBtn(false); const el=$("#progress"); if(el)el.hidden=true; },
+};
 
 async function resolveClaude(){
   try{
@@ -1179,7 +1206,7 @@ function boot(){
   addCompounds(sampleRows(),{replace:true});
   bindUI();
   const th=store.get("dl.theme"); if(th)document.documentElement.setAttribute("data-theme",th);
-  const tab=store.get("dl.tab"); switchTab(tab&&["compound","sar","table","data"].includes(tab)?tab:"compound");
+  switchTab("data"); // the PDF-upload view is the landing
   $("#boot").hidden=true; $("#app").hidden=false;
   resolveClaude();
 }
