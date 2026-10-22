@@ -37,6 +37,17 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   (`id, smiles, dc50_nm, dmax_pct, …`), a **SMILES list**, or an **SDF**; set the
   warhead scaffold; or paste a patent text excerpt.
 
+## Two versions
+
+- **`index.html`** — the original: opens with a loaded sample dataset.
+- **`index-v2.html`** — a blank landing built around dropping in a document. No
+  preloaded data; works on **patents and papers**; accepts **CSV / Excel (.xlsx) /
+  SDF / SMILES**; and on a PDF it does a **two-pass focused scan** — a quick text
+  pass locates the pages holding the numbered compound structures (usually the
+  tables toward the end), then Claude reads only those, skipping the rest (with an
+  optional page-range limit). Both share the same chemistry engine and the three
+  OCSR routes below.
+
 ## Running it
 
 Open `index.html` through any static web server so the WebAssembly module in
