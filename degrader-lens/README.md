@@ -37,8 +37,18 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   (`id, smiles, dc50_nm, dmax_pct, …`), a **SMILES list**, or an **SDF**; set the
   warhead scaffold; or paste a patent text excerpt.
 
-## Two versions
+## Versions
 
+- **`index-v5.html`** — v4 plus three refinements. **Linker length is the chain**
+  between the warhead and the E3 (the backbone atoms on the path between them),
+  reported separately from the linker colour region (which stays "everything that
+  isn't the warhead or E3"). **Push-to-all is stronger**: define the warhead and/or
+  E3 on one compound and it splits the whole series — the E3 is matched by your
+  captured fragment *or* the built-in E3-ligase anchor library, so defining just the
+  warhead is enough to decompose a congeneric set, and it reports how many matched.
+  **Compound numbering is unified**: "Compound 9", "Example 9" and a bare "9" in a
+  data table all count as the same compound, so a scanned table row merges onto its
+  structure by number.
 - **`index.html`** — the original: opens with a loaded sample dataset.
 - **`index-v4.html`** — v3 plus an **interactive structure view** and a **fast,
   decoupled PDF flow**. The depiction is clean (standard element colours; region
