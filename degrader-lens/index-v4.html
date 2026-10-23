@@ -666,11 +666,14 @@ function floodExclude(adj,start,ex){ const seen=new Set([start]),st=[start];
   while(st.length){ const u=st.pop(); for(const v of adj[u]) if(!ex.has(v)&&!seen.has(v)){ seen.add(v); st.push(v); } } return seen; }
 function matchTemplate(m,smarts){ if(!smarts) return []; const q=state.rdkit.get_qmol(smarts.replace(/@/g,""));
   let atoms=[]; if(q){ if(q.is_valid()){ try{ const mt=JSON.parse(m.get_substruct_match(q)); if(mt&&mt.atoms)atoms=mt.atoms; }catch(e){} } q.delete(); } return atoms; }
-// Build manualRegions for a molecule from an E3 and/or warhead atom match; infer the linker between.
+// Build manualRegions for a molecule from an E3 and/or warhead atom match.
+// When both anchors are known, the linker is EVERYTHING that is not warhead or E3
+// (the complement). With only one anchor, fall back to the scaffold-free auto split.
 function regionsFromAnchors(g,e3a,wara){
-  if(e3a.length && wara.length){ const path=shortestPath(g.adj,e3a,wara); const interior=path?path.slice(1,-1).filter(a=>!g.ring[a]):[];
-    const ls=new Set(interior); const e3c=floodExclude(g.adj,e3a[0],ls);
-    return {e3:[...e3c],lnk:interior,war:[...Array(g.na).keys()].filter(a=>!e3c.has(a)&&!ls.has(a))}; }
+  if(e3a.length && wara.length){ const e3=new Set(e3a), war=new Set(wara);
+    war.forEach(a=>e3.delete(a)); // warhead wins any overlap
+    const lnk=[]; for(let i=0;i<g.na;i++){ if(!war.has(i)&&!e3.has(i)) lnk.push(i); }
+    return {e3:[...e3],war:[...war],lnk}; }
   if(e3a.length){ const dc=autoDecompose(g,e3a); return dc?{e3:dc.e3,lnk:dc.linker,war:dc.warhead}:null; }
   if(wara.length){ const dc=autoDecompose(g,wara); return dc?{e3:dc.warhead,lnk:dc.linker,war:dc.e3}:null; }
   return null;
@@ -685,15 +688,20 @@ function applyTemplatesToAll(){
     if(mr){ c.manualRegions=mr; applyManualRegions(c); n++; } });
   state.showRegions=true; refreshAll(); return n;
 }
-function inferLinkerIfBoth(c){ const mr=c.manualRegions; if(!mr||!(mr.e3||[]).length||!(mr.war||[]).length) return;
-  const nr=withMol(c.smiles,m=>regionsFromAnchors(parseGraph(m.get_molblock()), mr.e3, mr.war)); if(nr) c.manualRegions=nr; }
-function applyManualRegions(c){ // rebuild regionMap + linker length from c.manualRegions
+// Rebuild regionMap + linker length from the user's warhead/E3 choice. The warhead and
+// E3 atoms are exactly what was assigned (they override auto-detection); the LINKER is
+// every remaining atom — everything not selected as warhead or E3.
+function applyManualRegions(c){
   const mr=c.manualRegions; if(!mr) return;
-  const reg={}; (mr.war||[]).forEach(a=>reg[a]="war"); (mr.e3||[]).forEach(a=>reg[a]="e3"); (mr.lnk||[]).forEach(a=>reg[a]="lnk");
-  c.regionMap=reg; c.waratoms=mr.war||[]; c.e3region=mr.e3||[]; c.lnkatoms=mr.lnk||[];
+  const g=graphOf(c); if(!g) return; const na=g.na;
+  const war=new Set(mr.war||[]); const e3=new Set(mr.e3||[]); war.forEach(a=>e3.delete(a));
+  const lnk=[]; for(let i=0;i<na;i++){ if(!war.has(i)&&!e3.has(i)) lnk.push(i); }
+  mr.war=[...war]; mr.e3=[...e3]; mr.lnk=lnk;
+  const reg={}; mr.war.forEach(a=>reg[a]="war"); mr.e3.forEach(a=>reg[a]="e3"); lnk.forEach(a=>reg[a]="lnk");
+  c.regionMap=reg; c.waratoms=mr.war; c.e3region=mr.e3; c.lnkatoms=lnk;
   c.autoDecomp=false; c.manual=true;
-  if(mr.lnk&&mr.lnk.length){ c.desc.linker_len=mr.lnk.length;
-    c.desc.linker_peg_o=withMol(c.smiles,m=>{const g=parseGraph(m.get_molblock());return mr.lnk.filter(a=>g.el[a]==="O").length;})||0; }
+  c.desc.linker_len=lnk.length;
+  c.desc.linker_peg_o=lnk.filter(a=>g.el[a]==="O").length;
 }
 
 /* ============================ rendering ============================ */
@@ -869,7 +877,7 @@ function renderDetail(){
       <div class="region-status">Warhead ${stat('war')} · E3 ${stat('e3')} · Linker <b>${c.desc.linker_len!=null?c.desc.linker_len+" atoms":""}</b>
         <button class="btn small" id="linkEnds" title="select the two linker ends">Linker from 2 ends</button>
         ${c.manual?`<button class="btn small" id="resetRegions">Reset to auto</button>`:""}</div>
-      <p class="help">The <b>linker is inferred</b> as the chain between the warhead and the E3 ligand — define those two and it fills in.</p>
+      <p class="help">The <b>linker is everything that isn't the warhead or the E3</b> — define those two and the rest fills in as the linker automatically.</p>
       ${tkeys.length?`<div class="apply-all"><button class="btn small primary" id="applyAll">Apply this ${tkeys.map(k=>k==='war'?'warhead':'E3').join(" + ")} to all ${nValid} compounds</button><div class="help" style="margin-top:4px">Matches the same fragment on every compound and infers each linker — define it once, done for the series.</div></div>`:""}`;
     const cp=$("#selCopy"); if(cp)cp.onclick=e=>copyText(frag,e.currentTarget);
     const sc=$("#selClear"); if(sc)sc.onclick=()=>{ sel.clear(); renderStruct(); renderSelBar(); };
@@ -881,10 +889,18 @@ function renderDetail(){
   const ensureManual=()=>{ if(!c.manualRegions) c.manualRegions={e3:[...(c.e3region||[])],lnk:[...(c.lnkatoms||[])],war:[...(c.waratoms||[])]}; };
   const refresh=()=>{ state.showRegions=true; renderTable(); renderGallery(); renderDetail(); };
   const assignRegion=r=>{ ensureManual(); const s=[...sel];
-    ["e3","lnk","war"].forEach(k=>{ c.manualRegions[k]=(c.manualRegions[k]||[]).filter(a=>!s.includes(a)); });
-    c.manualRegions[r]=[...new Set([...(c.manualRegions[r]||[]),...s])];
-    if(r==="e3"||r==="war"){ const frag=fragmentSmiles(c.smiles,s); if(frag) state.regionTemplates[r]=frag; }
-    inferLinkerIfBoth(c);
+    if(!s.length){ toast("Select some atoms first — drag a loop or tap atoms."); return; }
+    if(r==="war"||r==="e3"){
+      // The selection IS this region — it overrides any previous or auto-detected guess;
+      // the same atoms can't also be the other recruiter role.
+      const other = r==="war"?"e3":"war";
+      c.manualRegions[r]=[...new Set(s)];
+      c.manualRegions[other]=(c.manualRegions[other]||[]).filter(a=>!s.includes(a));
+      const frag=fragmentSmiles(c.smiles,s); if(frag) state.regionTemplates[r]=frag;
+    } else { // "linker": these atoms are neither warhead nor E3 — the linker is the remainder
+      c.manualRegions.war=(c.manualRegions.war||[]).filter(a=>!s.includes(a));
+      c.manualRegions.e3 =(c.manualRegions.e3 ||[]).filter(a=>!s.includes(a));
+    }
     applyManualRegions(c); sel.clear(); refresh(); };
   const setLinkerFromEnds=()=>{ if(sel.size!==2){ toast("Select exactly 2 atoms — the two ends of the linker."); return; }
     const g=graphOf(c); if(!g) return; const [a,b]=[...sel]; const path=pathBetween(g.adj,a,b); if(!path){ toast("No bonded path between those two atoms."); return; }
