@@ -1169,13 +1169,18 @@ function findSmilesInText(seg){
   const toks=seg.split(/[\s,;]+/);
   for(const t of toks){ if(molCandidate(t)){ const c=validSmiles(t,8); if(c) return c; } }
   return ""; }
+// Compound-label patterns seen in patents/papers: "Example 12", "Examples 12",
+// "Compound 7", "Compound No. 7", "Cmpd. 7", "Cpd 7", "Compd 7", "Ex. 5", "Ex 5" —
+// with an optional "No."/"number"/"#"/":"/"." between the word and the number.
+const CMPD_LABEL="\\b(examples?|compounds?|compd|cmpd|cpd|ex)\\.?\\s*(?:nos?\\.?|number|#)?\\s*[:.]?\\s*(\\d{1,4}[a-z]?)\\b";
 function extractPatentRecords(text){
   const rows=[];
-  const segs=text.split(/(?=(?:example|compound|cmpd|cpd)\s*[:#.]?\s*[0-9])/i);
+  const segs=text.split(new RegExp("(?="+CMPD_LABEL+")","i"));
+  const labelRe=new RegExp(CMPD_LABEL,"i");
   const conv=(v,u)=>{ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="mm")return v*1e6; if(u==="pm")return v/1000; return v; };
-  segs.forEach(seg=>{ const idm=seg.match(/(?:example|compound|cmpd|cpd)\s*[:#.]?\s*([0-9]+[a-z]?)/i); if(!idm) return;
-    const label=idm[0].replace(/\s+/g," ").replace(/[:#.]/g,"").trim();
-    const id=label.charAt(0).toUpperCase()+label.slice(1);
+  segs.forEach(seg=>{ const idm=seg.match(labelRe); if(!idm) return;
+    const kind=/^ex/i.test(idm[1])?"Example":"Compound"; // ex/example -> Example; compound/cmpd/cpd -> Compound
+    const id=kind+" "+idm[2].toUpperCase();
     const data={};
     const dc=seg.match(/dc\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
     const ic=seg.match(/ic\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
@@ -1254,10 +1259,15 @@ async function extractFromPDFClient(file){
     // ---- the biology SAR is ready now, from text alone (seconds) ----
     Progress.done();
     const withData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
+    const textChars=text.replace(/\s+/g,"").length;
+    const scanned = textChars < Math.max(200, pdf.numPages*40); // little/no machine-readable text = scanned/vector
+    const visionHint = state.sample ? "Tick “also read drawn structures” above and re-upload to read it with Claude." : "Open this in the claude.ai artifact and tick “also read drawn structures” to read it with Claude.";
     const sarMsg = rows.length
       ? `✓ Biology data ready — ${rows.length} compound(s), ${withData} with assay data, ${withStruct} with a structure${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}. Shown in the Table; open SAR to plot.`
-      : `Read ${pdf.numPages} page(s) but found no compound records in the text. Tick “also read drawn structures” to recover them from drawings${state.sample?"":" (claude.ai artifact only)"}.`;
-    setStatus(sarMsg, true);
+      : scanned
+        ? `This PDF has little or no machine-readable text (${textChars.toLocaleString()} characters over ${pdf.numPages} page(s)) — it looks like scanned pages or vector drawings, so there's nothing to read as text. ${visionHint}`
+        : `Read ${pdf.numPages} page(s) (${textChars.toLocaleString()} characters) but found no compound or example numbers. It may label compounds in a way I don't recognise — paste a sample line in the box below so I can tune it, or ${visionHint.charAt(0).toLowerCase()+visionHint.slice(1)}`;
+    setStatus(sarMsg, rows.length>0);
     // Jump to the Table so the biology data is visible by compound number right away;
     // structures (if enabled) then merge onto those rows in the background.
     if(rows.length && state.tab==="data") switchTab("table");
