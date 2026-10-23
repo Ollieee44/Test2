@@ -331,7 +331,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
           </div>
           <div class="inline" style="margin-top:7px">
             <label class="help" for="pdfRange" style="white-space:nowrap">Limit to pages (optional)</label>
-            <input type="text" id="pdfRange" placeholder="e.g. 80-140 or last 30" spellcheck="false" style="max-width:210px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:5px 8px;font:12px var(--f-mono)">
+            <input type="text" id="pdfRange" placeholder="e.g. 80-140, 160-180 or last 30" title="One or more ranges, comma-separated — e.g. 80-140, 160-180 (structures in one section, data tables in another), single pages, or 'last 30'" spellcheck="false" style="max-width:260px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:5px 8px;font:12px var(--f-mono)">
             <label id="keepUnnumWrap" style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="keepUnnum"> keep unnumbered structures</label>
           </div>
           <div class="datarow" style="margin-top:10px">
@@ -1407,11 +1407,14 @@ function textScore(t){ if(!t) return 0; let s=0;
   if(((t.match(/\b\d{1,3}\b/g)||[]).length) >= 15) s+=1; // a table of numbered rows
   return s;
 }
-function parseRange(str,total){ str=(str||"").trim(); if(!str) return null; const set=new Set();
-  const lm=str.match(/last\s+(\d+)/i); if(lm){ const n=+lm[1]; for(let p=Math.max(1,total-n+1);p<=total;p++)set.add(p); return set.size?set:null; }
-  str.split(",").forEach(part=>{ part=part.trim(); const m=part.match(/^(\d+)\s*-\s*(\d+)$/);
-    if(m){ const a=Math.max(1,+m[1]),b=Math.min(total,+m[2]); for(let p=a;p<=b;p++)set.add(p); }
-    else { const n=+part; if(n>=1&&n<=total)set.add(n); } });
+// Parse a page selection into a Set of page numbers. Accepts any number of parts separated by
+// commas or semicolons — each part a range ("80-140", en-dash or "to" ok), a "last N", or a
+// single page — so several ranges combine, e.g. "80-140, 160-180" or "5, 40-60, last 20".
+function parseRange(str,total){ str=(str||"").trim().toLowerCase(); if(!str) return null; const set=new Set();
+  str.split(/[,;]+/).forEach(part=>{ part=part.trim(); if(!part) return; let m;
+    if((m=part.match(/^last\s+(\d+)$/))){ const n=+m[1]; for(let p=Math.max(1,total-n+1);p<=total;p++)set.add(p); }
+    else if((m=part.match(/^(\d+)\s*(?:-|–|—|to)\s*(\d+)$/))){ const a=Math.max(1,Math.min(+m[1],+m[2])),b=Math.min(total,Math.max(+m[1],+m[2])); for(let p=a;p<=b;p++)set.add(p); }
+    else { const n=+part; if(Number.isInteger(n)&&n>=1&&n<=total)set.add(n); } });
   return set.size?set:null;
 }
 // Pass 1: use the already-read text to pick the few pages that hold numbered structures, then
