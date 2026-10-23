@@ -39,6 +39,16 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v6.html`** — v5 plus smarter region matching and a data-first scan.
+  **Push-to-all now uses flood-fill splitting**: it matches your E3/POI *cores* (and
+  the E3-ligase library) on every compound, then any ring system or substituent
+  hanging off a core — a slight recruiter/warhead variation the template didn't
+  match — is absorbed into *that ligand*, not the linker. The **linker is only the
+  acyclic chain between E3 and POI**, so single-atom differences no longer leak into
+  the linker. You can hold **several E3 and POI definitions** at once (define each
+  variant once), and the **page-range box is read in order** — list the data-table
+  pages first (e.g. `150-175, 60-110`) to match degradation data to compounds before
+  the structures are read.
 - **`index-v5.html`** — v4 plus three refinements. **Linker length is the chain**
   between the warhead and the E3 (the backbone atoms on the path between them),
   reported separately from the linker colour region (which stays "everything that
