@@ -1282,10 +1282,13 @@ async function extractFromPDFClient(file){
         setStatus(sarMsg+` No drawn-structure pages were found${range?" in that range":""}.`, true); return; }
       const perPage = state.ocsrTier==="quick"?6:state.ocsrTier==="complex"?70:35;
       const estMin = Math.max(1, Math.round(found.candidates.length*perPage/2/60));
-      setStatus(sarMsg+` Reading ${found.candidates.length} structure page(s) in the background (~${estMin} min at “${ {quick:"Fast",default:"Balanced",complex:"Best"}[state.ocsrTier] }”). Use the SAR now, narrow with a page range, or Stop.`, true);
+      const base = rows.length ? sarMsg+" " : "";
+      setStatus(base+`Reading ${found.candidates.length} page(s) with Claude for structures + biological data in the background (~${estMin} min at “${ {quick:"Fast",default:"Balanced",complex:"Best"}[state.ocsrTier] }”). Rows appear as they're read — narrow with a page range, or Stop.`, true);
       const v=await visionScanPdf(pdf, found.candidates, ctl);
       Progress.done(); Progress.stopBtn(false); state.visionAbort=null;
-      setStatus(sarMsg+` Structures: Claude read ${v.found} from ${v.scanned} page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. ⚠ verify the Claude-read ones.`, true);
+      const nowData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
+      setStatus(`Claude read ${v.found} structure(s) and data for ${v.dataFound} compound(s) across ${v.scanned} page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. ${state.compounds.length} compound(s) total, ${nowData} with assay data. ⚠ verify the Claude-read ones.`, true);
+      if(state.tab==="data" && state.compounds.length) switchTab("table");
     }
   }catch(e){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null; setStatus("PDF error: "+e.message,false); }
 }
@@ -1310,24 +1313,55 @@ function reviewReasons(o,canon){ const r=[]; const conf=(o.confidence||"").toLow
   if(o.formula){ const fRD=formulaFromSmiles(canon); if(fRD && !formulasMatch(o.formula,fRD)) r.push(`formula mismatch (read ${o.formula} vs SMILES ${fRD})`); }
   return r; }
 // Merge a Claude-read structure onto its matching text record (by compound label), keeping the data.
+// Keep only recognised assay keys from a Claude-read "data" object; coerce concentrations/percents
+// to numbers, keep a qualitative bucket as a short string.
+function cleanAssay(d){
+  if(!d || typeof d!=="object") return {};
+  const nmKeys=["dc50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","ternary_kd_nm","gi50_nm"];
+  const pctKeys=["dmax_pct","pct_inhibition"];
+  // parse a concentration to nM, honouring any unit suffix Claude may have left on it
+  const toNM=v=>{ const m=String(v).toLowerCase().replace(/,/g,"").match(/(-?[0-9.]+)\s*(nm|µm|μm|um|mm|pm|nmol)?/);
+    if(!m) return null; let n=parseFloat(m[1]); if(isNaN(n)) return null; const u=m[2]||"";
+    if(u==="µm"||u==="μm"||u==="um") n*=1000; else if(u==="mm") n*=1e6; else if(u==="pm") n/=1000; return n; };
+  const out={};
+  nmKeys.forEach(k=>{ if(d[k]!=null){ const n=toNM(d[k]); if(n!=null) out[k]=n; } });
+  pctKeys.forEach(k=>{ if(d[k]!=null){ const n=parseFloat(String(d[k]).replace(/[,% ]/g,"")); if(!isNaN(n)) out[k]=n; } });
+  if(d.potency!=null){ const s=String(d.potency).trim(); if(s && s.length<=6) out.potency=s.toUpperCase(); }
+  return out;
+}
+// Merge one Claude-read record onto its compound by number: attach a drawn STRUCTURE and/or any
+// ASSAY DATA read from the page. Records with only data become data-only rows (like text extraction);
+// records with a structure are analysed. Returns {struct, data} counts of what it contributed.
 function mergeVisionStructure(o, srcPage){
-  const canon=withMol(o.smiles,m=>m.get_smiles()); if(!canon) return 0;
   const nid=normId(o.id);
-  if(!nid && !state.keepUnnumbered) return 0; // tidy: drop unnumbered structures (intermediates / fragments)
-  const reasons=reviewReasons(o,canon);
-  const flag=c=>{ c.source="claude"; c.needsReview=reasons.length>0; c.reviewReason=reasons.join("; ");
+  const canon = o.smiles ? withMol(o.smiles,m=>m.get_smiles()) : null;
+  const data = cleanAssay(o.data);
+  const hasData = Object.keys(data).length>0;
+  if(!canon && !hasData) return {struct:0,data:0};        // nothing useful on this page for it
+  if(!nid && !state.keepUnnumbered) return {struct:0,data:0}; // tidy: drop unnumbered fragments
+  const reasons = canon ? reviewReasons(o,canon) : [];
+  const flagStruct=c=>{ c.source="claude"; c.needsReview=reasons.length>0; c.reviewReason=reasons.join("; ");
     c.claudeConfidence=o.confidence||null; c.claudeFormula=o.formula||null; if(srcPage)c.srcPage=srcPage; return c; };
-  const tgt=nid?state.compounds.find(c=>normId(c.id)===nid):null;
+  const tgt = nid ? state.compounds.find(c=>normId(c.id)===nid) : null;
+  let struct=0, dataN=0;
+
   if(tgt){
-    if(tgt.dataOnly||!tgt.valid){ const i=state.compounds.indexOf(tgt);
-      const base=(tgt.series||"patent").replace(/ · Claude-read.*/,"");
-      state.compounds[i]=flag(analyse({id:tgt.id,name:tgt.name,series:base+" · Claude-read",smiles:canon,data:tgt.data||{}}));
-      return 1; }
-    return 0; // already has a structure from the text — keep the exact one
+    if(hasData){ const before=JSON.stringify(tgt.data||{}); tgt.data={...(tgt.data||{}),...data}; if(JSON.stringify(tgt.data)!==before) dataN=1; }
+    if(canon){
+      if(tgt.dataOnly || !tgt.valid){ // upgrade a data-only row to a real structure, keeping its data
+        const i=state.compounds.indexOf(tgt); const base=(tgt.series||"patent").replace(/ · Claude-read.*/,"");
+        state.compounds[i]=flagStruct(analyse({id:tgt.id,name:tgt.name,series:base+" · Claude-read",smiles:canon,data:tgt.data||{}}));
+        struct=1;
+      } // else: already has a structure — keep the exact one (data, if any, was merged above)
+    }
+    return {struct,data:dataN};
   }
+  // new compound
   const id=o.id||("Claude-"+(state.compounds.length+1));
-  state.compounds.push(flag(analyse({id,name:id,series:"patent/paper · Claude-read",smiles:canon,data:{}})));
-  return 1;
+  if(canon){ state.compounds.push(flagStruct(analyse({id,name:id,series:"patent/paper · Claude-read",smiles:canon,data}))); struct=1; if(hasData)dataN=1; }
+  else { state.compounds.push({id,name:id,series:"patent/paper · Claude-read",smiles:"",data,
+    valid:false,dataOnly:true,desc:{},e3:null,e3atoms:[],waratoms:[],lnkatoms:[],regionMap:{}}); dataN=1; }
+  return {struct,data:dataN};
 }
 // Quick context score for a page's text: does it look like a numbered-compound / assay / SMILES page?
 function textScore(t){ if(!t) return 0; let s=0;
@@ -1363,16 +1397,16 @@ async function findStructurePages(pdf, pageTexts, range, ctl){
 }
 async function visionScanPdf(pdf, pages, ctl){
   if(!pages || !pages.length || (ctl&&ctl.signal.aborted)) return {scanned:0,found:0};
-  const t0=Date.now(); Progress.t0=t0; let done=0,found=0,stopped=false,rateLimited=false;
+  const t0=Date.now(); Progress.t0=t0; let done=0,found=0,dataFound=0,stopped=false,rateLimited=false;
   // time-left is shown by Progress from the fraction; keep the detail line to page / found counts.
-  const update=()=>{ Progress.set("Reading structures with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} structure(s) found`); };
+  const update=()=>{ Progress.set("Reading structures + data with Claude", done/pages.length, `page ${done}/${pages.length} · ${found} structure(s), ${dataFound} with data`); };
   update();
   const worker=async(p)=>{
     if(ctl.signal.aborted) return;
     try{
       const blob=await renderPdfPage(pdf,p);
       const arr=await state.sample.json(OCSR_PROMPT,{images:[blob],modelTier:state.ocsrTier,signal:ctl.signal});
-      (Array.isArray(arr)?arr:[]).forEach(o=>{ if(o&&o.smiles) found+=mergeVisionStructure(o,p); });
+      (Array.isArray(arr)?arr:[]).forEach(o=>{ if(o&&(o.smiles||o.data)){ const r=mergeVisionStructure(o,p); found+=r.struct; dataFound+=r.data; } });
       refreshAll();
     }catch(e){ if(e.code==="cancelled"){stopped=true;} else if(e.code==="rate_limited"){rateLimited=true;ctl.abort();}
       else if(e.code==="not_granted"||e.code==="sampling_disabled"){stopped=true;ctl.abort();} }
@@ -1381,20 +1415,21 @@ async function visionScanPdf(pdf, pages, ctl){
   const queue=[...pages]; const run=async()=>{ while(queue.length && !ctl.signal.aborted){ await worker(queue.shift()); } };
   await Promise.all([run(),run()]); // small concurrency to respect rate limits
   Progress.stopBtn(false); state.visionAbort=null;
-  return {scanned:pages.length, found, stopped, rateLimited};
+  return {scanned:pages.length, found, dataFound, stopped, rateLimited};
 }
 
 /* ============================ Claude vision OCSR (in-browser) ============================ */
-const OCSR_PROMPT = `You are an expert cheminformatician performing optical chemical structure recognition (OCSR) on drawings from a medicinal-chemistry patent or paper. The structures may be heterobifunctional degraders (PROTACs) or molecular glues.
+const OCSR_PROMPT = `You are an expert cheminformatician reading ONE page image from a medicinal-chemistry patent or paper about targeted protein degraders (PROTACs) or molecular glues. The page may show chemical structure drawings, a table of biological data, or both. This is often a scanned page, so read the text in the image too.
 
-Return ONLY a JSON array, one element per distinct drawn FINAL compound:
-[{"id": <string|null>, "smiles": <string>, "formula": <string>, "confidence": "high"|"medium"|"low"}]
-- "smiles": one valid SMILES for that structure. Include stereochemistry (@, @@, / , \\) where it is drawn. Expand only abbreviations you are sure of (e.g. Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see.
-- "id": the compound label printed beside it if visible (e.g. "Example 12", "Compound 7"), else null.
-- "formula": the molecular formula of your SMILES in Hill order (e.g. "C34H38N6O7"), as an independent count of what is drawn — use it to double-check your own SMILES.
-- "confidence": how sure you are the SMILES matches the drawing.
-ONLY return numbered, final example/claimed compounds. SKIP synthetic intermediates, reagents, building blocks, starting materials, linkers on their own, protecting-group fragments, and reference/comparator compounds.
-If there is no such structure, return []. No text outside the JSON array.`;
+Return ONLY a JSON array, one element per distinct numbered compound you can identify on this page (by its printed label, e.g. "Example 12", "Compound 7"):
+[{"id": <string|null>, "smiles": <string|null>, "formula": <string|null>, "confidence": "high"|"medium"|"low", "data": {}}]
+- "id": the compound/example label printed next to the structure or in the table row (e.g. "Example 12", "Compound 7"), else null.
+- "smiles": a valid SMILES ONLY if a chemical STRUCTURE for this compound is DRAWN on this page. Include stereochemistry (@, @@, /, \\) where drawn; expand only abbreviations you are sure of (Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see. Use null if this page only lists the compound in a table (no drawing).
+- "formula": molecular formula of your SMILES in Hill order (e.g. "C34H38N6O7") to cross-check it; null if no structure.
+- "confidence": how sure the SMILES matches the drawing ("low" if there is no structure).
+- "data": an object with any BIOLOGICAL ASSAY values shown for this compound on this page. Use these keys where applicable and OMIT keys you do not see: dc50_nm, ic50_nm, ec50_nm, ki_nm, kd_nm, dmax_pct, gi50_nm, pct_inhibition — all CONCENTRATIONS in nM (convert µM→nM ×1000, pM→nM ÷1000; a percentage like Dmax or % inhibition stays a percent) — and "potency" for a qualitative bucket such as "+", "++", "+++" or a letter grade. Use {} if no assay values are shown.
+ONLY include numbered, final example/claimed compounds. SKIP synthetic intermediates, reagents, building blocks, starting materials, linkers on their own, protecting-group fragments, and reference/comparator compounds.
+If the page shows no such compounds, return []. No text outside the JSON array.`;
 
 function fmtDur(s){ s=Math.max(0,Math.round(s)); const m=Math.floor(s/60),ss=s%60; return m?`${m}m ${ss<10?"0":""}${ss}s`:`${ss}s`; }
 const Progress={
