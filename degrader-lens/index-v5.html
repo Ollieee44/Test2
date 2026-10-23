@@ -284,12 +284,13 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <button class="tab" role="tab" data-tab="data">Data</button>
       </div>
 
-      <!-- progress lives above the panes so the timer stays visible on any tab -->
+      <!-- progress + status live above the panes so they stay visible on any tab -->
       <div id="progress" hidden style="margin:10px 14px 0">
         <div class="prog-head"><span id="progStage">Working…</span><span id="progTime"></span></div>
         <div class="prog-bar"><div id="progFill"></div></div>
         <div class="prog-sub"><span id="progDetail"></span><button class="btn small" id="progStop" hidden>Stop</button></div>
       </div>
+      <div id="dataStatus" style="margin:8px 14px 0"></div>
 
       <div class="pane" id="pane-compound" role="tabpanel"></div>
 
@@ -397,8 +398,6 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             <label style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="ocsrOn"> run OCSR on the server</label>
           </div>
         </section>
-
-        <div id="dataStatus"></div>
       </div>
     </div>
   </div>
@@ -1291,33 +1290,43 @@ async function extractFromPDFClient(file){
     const withData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
     const textChars=text.replace(/\s+/g,"").length;
     const scanned = textChars < Math.max(200, pdf.numPages*40); // little/no machine-readable text = scanned/vector
-    const visionHint = state.sample ? "Tick “also read drawn structures” above and re-upload to read it with Claude." : "Open this in the claude.ai artifact and tick “also read drawn structures” to read it with Claude.";
-    const sarMsg = rows.length
-      ? `✓ Biology data ready — ${rows.length} compound(s), ${withData} with assay data, ${withStruct} with a structure${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}. Shown in the Table; open SAR to plot.`
-      : scanned
-        ? `This PDF has little or no machine-readable text (${textChars.toLocaleString()} characters over ${pdf.numPages} page(s)) — it looks like scanned pages or vector drawings, so there's nothing to read as text. ${visionHint}`
-        : `Read ${pdf.numPages} page(s) (${textChars.toLocaleString()} characters) but found no compound or example numbers. It may label compounds in a way I don't recognise — paste a sample line in the box below so I can tune it, or ${visionHint.charAt(0).toLowerCase()+visionHint.slice(1)}`;
-    setStatus(sarMsg, rows.length>0);
-    // Jump to the Table so the biology data is visible by compound number right away;
-    // structures (if enabled) then merge onto those rows in the background.
-    if(rows.length && state.tab==="data") switchTab("table");
-    // ---- optional, separate, background: read drawn structures (can be slow) ----
     const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
+    const visionHint = state.sample ? "Tick “also read drawn structures” above and re-upload to read it with Claude." : "Open this in the claude.ai artifact and tick “also read drawn structures” to read it with Claude.";
+    // Status for the text pass. When Claude will read the pages next, don't discourage with a
+    // "nothing readable" message — say what the text gave and that structure+data reading is starting.
+    if(rows.length){
+      setStatus(`✓ Text pass: ${rows.length} compound(s), ${withData} with assay data, ${withStruct} with a structure${tg.length?` · target ${esc(tg.join(", "))}`:""}.${visionOn?" Now reading the pages with Claude for structures + any data in the drawings/tables…":" Shown in the Table; open SAR to plot."}`, true);
+    } else if(visionOn){
+      setStatus(`${scanned?`Scanned PDF — no machine-readable text (${pdf.numPages} page(s)).`:`No compound numbers in the text (${pdf.numPages} page(s)).`} Reading the pages with Claude for structures + biological data…`, true);
+    } else {
+      setStatus(scanned
+        ? `This PDF has little or no machine-readable text (${textChars.toLocaleString()} characters over ${pdf.numPages} page(s)) — it looks like scanned pages or vector drawings. ${visionHint}`
+        : `Read ${pdf.numPages} page(s) (${textChars.toLocaleString()} characters) but found no compound or example numbers. It may label compounds in a way I don't recognise — paste a sample line below, or ${visionHint.charAt(0).toLowerCase()+visionHint.slice(1)}`, false);
+    }
+    // Show the data/structures as they populate — go to the Table whenever there is or will be content.
+    if((rows.length || visionOn) && state.tab==="data") switchTab("table");
+    // ---- optional, separate, background: read drawn structures + tabular data with Claude ----
     if(visionOn){
       const ctl=new AbortController(); state.visionAbort=ctl;
-      Progress.start("Finding structure pages",""); Progress.stopBtn(true,()=>ctl.abort());
       const range=parseRange($("#pdfRange")?$("#pdfRange").value:"", pdf.numPages);
-      const found=await findStructurePages(pdf, pageTexts, range, ctl);
-      if(!found.candidates.length){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null;
-        setStatus(sarMsg+` No drawn-structure pages were found${range?" in that range":""}.`, true); return; }
+      let candidates;
+      if(scanned){ // every page is an image — read the selected pages directly, skip graphics detection
+        candidates=[]; for(let p=1;p<=pdf.numPages;p++){ if(!range||range.has(p)) candidates.push(p); }
+        Progress.start("Reading pages with Claude",""); Progress.stopBtn(true,()=>ctl.abort());
+      } else {
+        Progress.start("Finding the pages with structures",""); Progress.stopBtn(true,()=>ctl.abort());
+        const found=await findStructurePages(pdf, pageTexts, range, ctl); candidates=found.candidates;
+      }
+      if(!candidates.length){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null;
+        setStatus(`No pages to read${range?" in that page range":""}. ${scanned?"Try a wider range.":"Tick a page range or check the document."}`, false); return; }
       const perPage = state.ocsrTier==="quick"?6:state.ocsrTier==="complex"?70:35;
-      const estMin = Math.max(1, Math.round(found.candidates.length*perPage/2/60));
-      const base = rows.length ? sarMsg+" " : "";
-      setStatus(base+`Reading ${found.candidates.length} page(s) with Claude for structures + biological data in the background (~${estMin} min at “${ {quick:"Fast",default:"Balanced",complex:"Best"}[state.ocsrTier] }”). Rows appear as they're read — narrow with a page range, or Stop.`, true);
-      const v=await visionScanPdf(pdf, found.candidates, ctl);
+      const estMin = Math.max(1, Math.round(candidates.length*perPage/2/60));
+      setStatus(`Reading ${candidates.length} page(s) with Claude for structures + biological data (~${estMin} min at “${ {quick:"Fast",default:"Balanced",complex:"Best"}[state.ocsrTier] }”). Rows appear in the Table as they're read — narrow with a page range, or press Stop.`, true);
+      const v=await visionScanPdf(pdf, candidates, ctl);
       Progress.done(); Progress.stopBtn(false); state.visionAbort=null;
       const nowData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
-      setStatus(`Claude read ${v.found} structure(s) and data for ${v.dataFound} compound(s) across ${v.scanned} page(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" (stopped)":""}. ${state.compounds.length} compound(s) total, ${nowData} with assay data. ⚠ verify the Claude-read ones.`, true);
+      const nStruct=state.compounds.filter(c=>c.valid).length;
+      setStatus(`✓ Claude read ${v.scanned} page(s): ${v.found} structure(s), data for ${v.dataFound} compound(s)${v.rateLimited?" — stopped at your Claude usage limit":v.stopped?" — stopped":""}. Now ${state.compounds.length} compound(s): ${nStruct} with a structure, ${nowData} with assay data. ⚠ verify the Claude-read ones against the page.`, true);
       if(state.tab==="data" && state.compounds.length) switchTab("table");
     }
   }catch(e){ Progress.hide(); Progress.stopBtn(false); state.visionAbort=null; setStatus("PDF error: "+e.message,false); }
