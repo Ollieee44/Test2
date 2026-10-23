@@ -284,6 +284,13 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <button class="tab" role="tab" data-tab="data">Data</button>
       </div>
 
+      <!-- progress lives above the panes so the timer stays visible on any tab -->
+      <div id="progress" hidden style="margin:10px 14px 0">
+        <div class="prog-head"><span id="progStage">Working…</span><span id="progTime"></span></div>
+        <div class="prog-bar"><div id="progFill"></div></div>
+        <div class="prog-sub"><span id="progDetail"></span><button class="btn small" id="progStop" hidden>Stop</button></div>
+      </div>
+
       <div class="pane" id="pane-compound" role="tabpanel"></div>
 
       <div class="pane" id="pane-sar" role="tabpanel" hidden>
@@ -308,12 +315,6 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
       <div class="pane" id="pane-data" role="tabpanel">
         <h2>Drop in a patent or paper</h2>
         <p class="sub">Structures and data come out together — read in your browser (RDKit WebAssembly). Nothing is uploaded.</p>
-
-        <div id="progress" hidden>
-          <div class="prog-head"><span id="progStage">Working…</span><span id="progTime"></span></div>
-          <div class="prog-bar"><div id="progFill"></div></div>
-          <div class="prog-sub"><span id="progDetail"></span><button class="btn small" id="progStop" hidden>Stop</button></div>
-        </div>
 
         <div id="poiBanner" hidden style="margin-bottom:12px"></div>
 
@@ -1228,6 +1229,7 @@ async function extractViaServer(file,url,ocsr){
     const withS=rows.filter(r=>r.smiles).length, rr=addCompounds(rows);
     const extra=j.ocsr_used?" OCSR recovered drawn structures." : (ocsr&&j.ocsr_error?` Server OCSR unavailable (${esc(j.ocsr_error)}).`:"");
     setStatus(`${esc(j.filename||file.name)} via server: ${j.pages} pages → ${rows.length} records (${withS} with SMILES). Added ${rr.added}, merged ${rr.merged}, ${rr.dataOnly} data-only.${extra}`, rr.bad===0);
+    if(rows.length && state.tab==="data") switchTab("table");
   }catch(e){ Progress.hide();
     setStatus("OCSR server unreachable ("+e.message+") — using in-browser text extraction instead.",false);
     return extractFromPDFClient(file); }
@@ -1239,18 +1241,12 @@ async function extractFromPDFClient(file){
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf),isEvalSupported:false}).promise;
     state.pdfDoc=pdf; state.pdfName=file.name; showPdfPagePicker();
-    let text=""; const pageTexts=[]; let lastAdd=0;
-    for(let p=1;p<=pdf.numPages;p++){
+    let text=""; const pageTexts=[];
+    for(let p=1;p<=pdf.numPages;p++){ Progress.set("Reading the document text", p/pdf.numPages, `page ${p} / ${pdf.numPages}`);
       const page=await pdf.getPage(p); const tc=await page.getTextContent();
-      const pt=tc.items.map(i=>i.str).join(" "); pageTexts.push(pt); text+=pt+"\n"; if(page.cleanup)page.cleanup();
-      // Biological data first: as pages come in, pull the assay records and populate by compound
-      // number, so the Table / SAR fill in live while the (slower) structures are read afterward.
-      if(p-lastAdd>=5 && p!==pdf.numPages){ lastAdd=p;
-        const recs=extractPatentRecords(text); if(recs.length) addCompounds(recs);
-        const tgp=detectTargets(text); if(tgp.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tgp])]; renderTargets(); }
-        await new Promise(requestAnimationFrame); }
-      Progress.set("Reading biological data", p/pdf.numPages, `page ${p} / ${pdf.numPages} · ${state.compounds.length} compound(s) so far`);
-    }
+      const pt=tc.items.map(i=>i.str).join(" "); pageTexts.push(pt); text+=pt+"\n"; if(page.cleanup)page.cleanup(); }
+    // Biological data first: one fast pass over the full text — compound numbers + assay values.
+    Progress.set("Pulling biological data by compound number", null, "scanning for compound numbers + assay values");
     const rows=extractPatentRecords(text);
     const tg=detectTargets(text); if(tg.length){ state.detectedTargets=[...new Set([...state.detectedTargets,...tg])]; renderTargets(); }
     const withStruct=rows.filter(r=>r.smiles).length;
@@ -1259,9 +1255,12 @@ async function extractFromPDFClient(file){
     Progress.done();
     const withData=state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>c.data[k]!=null)).length;
     const sarMsg = rows.length
-      ? `✓ Biology SAR ready — ${rows.length} compound(s), ${withStruct} with a structure, ${withData} with assay data${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}. Open the SAR / Table tab.`
+      ? `✓ Biology data ready — ${rows.length} compound(s), ${withData} with assay data, ${withStruct} with a structure${tg.length?`. Target (POI): ${esc(tg.join(", "))}`:""}. Shown in the Table; open SAR to plot.`
       : `Read ${pdf.numPages} page(s) but found no compound records in the text. Tick “also read drawn structures” to recover them from drawings${state.sample?"":" (claude.ai artifact only)"}.`;
     setStatus(sarMsg, true);
+    // Jump to the Table so the biology data is visible by compound number right away;
+    // structures (if enabled) then merge onto those rows in the background.
+    if(rows.length && state.tab==="data") switchTab("table");
     // ---- optional, separate, background: read drawn structures (can be slow) ----
     const visionOn = state.sample && $("#pdfVision") && !$("#pdfVisionWrap").hidden && $("#pdfVision").checked;
     if(visionOn){
