@@ -39,6 +39,21 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v7.html`** — v6 plus sharper decomposition, an SAR-interpretation tab, and a
+  self-checking reader. The **linker is now strictly the contiguous chain between E3 and
+  POI**: both ligands are flood-filled outward, so a ring, substituent or stray oxygen that
+  the match/lasso didn't cover is pulled back into its ligand instead of being coloured as
+  linker (a fuller VHL recruiter anchor is included too). A new **Interpret tab** gives
+  med-chem read-outs computed from the decomposition + potency: **matched molecular pairs**
+  (compounds that share two regions and differ in one, ranked by fold-change), **linker-length
+  SAR** with the optimum per congeneric series, **what tracks with potency**, and a **compare
+  tool** — pick any two compounds and the atoms that differ are highlighted on each structure
+  (atom-environment diff, since RDKit.js here has no MCS). When reading drawn structures,
+  Claude now **double-checks each structure against its page immediately** and corrects it (a
+  second pass, slower but much more accurate — toggleable). A **"Load patent-style examples"**
+  button loads an illustrative LRRK2 CRBN PROTAC series built from the WO 2025/072629 chemotype
+  (benzimidazolone–glutarimide recruiter + indazole/pyrimidine warhead + PEG linker; synthetic
+  DC₅₀/Dmax) to exercise all of the above.
 - **`index-v6.html`** — v5 plus smarter region matching and a data-first scan.
   **Push-to-all now uses flood-fill splitting**: it matches your E3/POI *cores* (and
   the E3-ligase library) on every compound, then any ring system or substituent
