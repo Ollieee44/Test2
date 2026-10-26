@@ -711,15 +711,16 @@ function regionsFromAnchors(g,e3a,wara){
 // fragment. Returns {matched, skipped} so the UI can report how far it reached.
 function applyTemplatesToAll(){
   const t=state.regionTemplates||{}; const e3t=t.e3||[], wart=t.war||[];
-  if(!e3t.length && !wart.length) return {matched:0,skipped:0};
-  let matched=0, skipped=0;
+  if(!e3t.length && !wart.length) return {matched:0,skipped:0,kept:0};
+  let matched=0, skipped=0, kept=0;
   state.compounds.forEach(c=>{ if(!c.valid) return;
+    if(c.userDefined){ kept++; return; }               // leave hand-defined compounds exactly as they are
     const mr=withMol(c.smiles,m=>{ const g=parseGraph(m.get_molblock());
       const e3a = matchE3On(m, e3t);                  // any captured E3 variant, else anchor library
       const wara = matchAny(m, wart);                 // any captured POI/warhead variant
       return (e3a.length||wara.length)? regionsFromAnchors(g,e3a,wara) : null; });
     if(mr){ c.manualRegions=mr; applyManualRegions(c); matched++; } else skipped++; });
-  state.showRegions=true; refreshAll(); return {matched,skipped};
+  state.showRegions=true; refreshAll(); return {matched,skipped,kept};
 }
 // Rebuild regionMap + linker length from the user's warhead/E3 choice. The warhead and E3
 // atoms are exactly what was assigned (they override auto-detection); the linker REGION is
@@ -925,7 +926,7 @@ function renderDetail(){
     bar.querySelectorAll('[data-reg]').forEach(b=>{ if(!b.disabled)b.onclick=()=>assignRegion(b.dataset.reg); });
     const le=$("#linkEnds"); if(le)le.onclick=setLinkerFromEnds;
     const rr=$("#resetRegions"); if(rr)rr.onclick=resetRegions;
-    const aa=$("#applyAll"); if(aa)aa.onclick=()=>{ const r=applyTemplatesToAll(); toast(`Split ${r.matched} compound(s)${r.skipped?` — ${r.skipped} couldn't be matched`:""}; linker chain lengths computed.`); };
+    const aa=$("#applyAll"); if(aa)aa.onclick=()=>{ const r=applyTemplatesToAll(); toast(`Split ${r.matched} compound(s)${r.kept?`, kept ${r.kept} you defined by hand`:""}${r.skipped?`, ${r.skipped} unmatched`:""}.`); renderDetail(); };
     const ct=$("#clearTpl"); if(ct)ct.onclick=()=>{ state.regionTemplates={e3:[],war:[]}; renderSelBar(); toast("Cleared E3/POI definitions."); };
   };
   const ensureManual=()=>{ if(!c.manualRegions) c.manualRegions={e3:[...(c.e3region||[])],lnk:[...(c.lnkatoms||[])],war:[...(c.waratoms||[])]}; };
@@ -945,6 +946,7 @@ function renderDetail(){
       c.manualRegions.war=(c.manualRegions.war||[]).filter(a=>!s.includes(a));
       c.manualRegions.e3 =(c.manualRegions.e3 ||[]).filter(a=>!s.includes(a));
     }
+    c.userDefined=true; // hand-defined — apply-to-all must never overwrite this compound
     applyManualRegions(c); sel.clear(); refresh(); };
   const setLinkerFromEnds=()=>{ if(sel.size!==2){ toast("Select exactly 2 atoms — the two ends of the linker."); return; }
     const g=graphOf(c); if(!g) return; const [a,b]=[...sel]; const path=pathBetween(g.adj,a,b); if(!path){ toast("No bonded path between those two atoms."); return; }
@@ -953,6 +955,7 @@ function renderDetail(){
     if(anchor!=null && !linkSet.has(anchor)){ const seen=new Set([anchor]),st=[anchor];
       while(st.length){ const u=st.pop(); for(const v of g.adj[u]) if(!linkSet.has(v)&&!seen.has(v)){seen.add(v);st.push(v);} }
       c.manualRegions.e3=[...seen]; c.manualRegions.war=[...Array(g.na).keys()].filter(i=>!seen.has(i)&&!linkSet.has(i)); }
+    c.userDefined=true; // hand-defined — apply-to-all must never overwrite this compound
     applyManualRegions(c); sel.clear(); refresh(); };
   const resetRegions=()=>{ delete c.manualRegions; const fresh=analyse({id:c.id,name:c.name,series:c.series,smiles:c.smiles,data:c.data});
     const i=state.compounds.indexOf(c); if(i>=0) state.compounds[i]=fresh; state.selectedId=fresh.id; renderTable(); renderGallery(); renderDetail(); };
