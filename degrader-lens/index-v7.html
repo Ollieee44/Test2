@@ -186,6 +186,8 @@ section.block>h3{font:600 11px var(--f-body);letter-spacing:.07em;text-transform
 .field{display:flex;flex-direction:column;gap:3px}
 .field label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .field select{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 8px;font-size:12.5px}
+.axrange{display:flex;gap:4px}
+.axrange input{width:54px;border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:5px 6px;font:12px var(--f-mono)}
 .chartwrap{position:relative;border:1px solid var(--line);border-radius:8px;background:var(--stage);padding:6px}
 .chartwrap svg{display:block;width:100%;height:auto}
 .chart-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:8px;color:var(--ink)}
@@ -503,6 +505,7 @@ const DESCRIPTOR_FIELDS = [
   ["hbd","HBD","",false],["hba","HBA","",false],["rot","Rot. bonds","",false],
   ["rings","Rings","",false],["fsp3","Fsp³","",false],["heavy","Heavy atoms","",false],
   ["linker_len","Linker length","atoms",false],["linker_peg_o","Linker ethers","O",false],
+  ["span","Total length","atoms",false],
 ];
 // Nice labels for well-known keys. NOT a fixed schema — the app shows whatever assay
 // fields the scanned document actually contains (see assayKeys / labelMeta).
@@ -523,7 +526,7 @@ const state = {
   compounds:[], selectedId:null, tab:"compound",
   filterE3:new Set(), query:"",
   sort:{key:"id",dir:1}, hlSmarts:"",
-  chart:{x:"linker_len",y:"dc50_nm",log:true,color:"ligase"},
+  chart:{x:"linker_len",y:"dc50_nm",log:true,xlog:false,color:"ligase",xmin:null,xmax:null,ymin:null,ymax:null},
   sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
   keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick", regionTemplates:{e3:[],war:[]},
 };
@@ -583,6 +586,12 @@ function shortestPath(adj,setA,setB){
   if(hit===-1) return null;
   const path=[]; let c=hit; while(c!==-1){ path.push(c); c=prev[c]; } return path.reverse();
 }
+// Topological diameter: the longest shortest path (in bonds) between any two atoms — i.e. the
+// distance across the molecule between its two most distal atoms. +1 of this = atoms spanned.
+function graphDiameter(g){ const na=g.na; if(na<=1) return 0; let diam=0;
+  for(let s=0;s<na;s++){ const dist=new Array(na).fill(-1); dist[s]=0; const q=[s];
+    for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of g.adj[u]) if(dist[v]<0){ dist[v]=dist[u]+1; q.push(v); if(dist[v]>diam) diam=dist[v]; } } }
+  return diam; }
 
 // core per-compound analysis (creates a mol from canonical smiles, computes everything, frees it)
 // Scaffold-free decomposition: warhead = the ligand farthest from the E3 anchor across
@@ -623,6 +632,7 @@ function analyse(raw){
     };
     out.desc.hbd=pick("NumHBD","lipinskiHBD"); // ensure correct
     const graph=parseGraph(m.get_molblock());
+    out.desc.span=graphDiameter(graph)+1; // total length = atoms spanned by the two most distal atoms
     // E3 detection
     out.e3=null; out.e3atoms=[];
     for(let i=0;i<state.qmolAnchors.length;i++){ const q=state.qmolAnchors[i]; if(!q) continue;
@@ -786,15 +796,21 @@ function applyTemplatesToAll(){
 // the linker is ONLY the contiguous chain between them and any stray ligand atom the lasso missed
 // (a carbonyl oxygen, a substituent) is pulled back into its ligand rather than coloured as linker.
 // Linker LENGTH is the acyclic atoms of that bridge (rings belong to ligands).
+// Rebuild regions from the assigned warhead/E3 sets. Manual assignment is taken EXACTLY — the
+// warhead and E3 are precisely the atoms you set, the linker is everything else — so you always
+// have full, predictable control (nothing floods your selection). Push-to-all's flood-fill (which
+// absorbs stray ligand atoms) happens upstream in regionsFromAnchors/splitByBridge and is carried
+// in mr.war/mr.e3, which this preserves. The linker LENGTH is the acyclic (chain) atoms.
 function applyManualRegions(c){
   const mr=c.manualRegions; if(!mr) return;
-  const g=graphOf(c); if(!g) return;
-  const sp=splitByBridge(g, mr.e3||[], mr.war||[]);
-  mr.e3=sp.e3; mr.war=sp.war; mr.lnk=sp.lnk;
-  const reg={}; mr.war.forEach(a=>reg[a]="war"); mr.e3.forEach(a=>reg[a]="e3"); mr.lnk.forEach(a=>reg[a]="lnk");
-  c.regionMap=reg; c.waratoms=mr.war; c.e3region=mr.e3; c.lnkatoms=mr.lnk; c._rf=undefined;
+  const g=graphOf(c); if(!g) return; const na=g.na;
+  const war=new Set(mr.war||[]); const e3=new Set(mr.e3||[]); war.forEach(a=>e3.delete(a));
+  const lnk=[]; for(let i=0;i<na;i++){ if(!war.has(i)&&!e3.has(i)) lnk.push(i); }
+  mr.war=[...war]; mr.e3=[...e3]; mr.lnk=lnk;
+  const reg={}; mr.war.forEach(a=>reg[a]="war"); mr.e3.forEach(a=>reg[a]="e3"); lnk.forEach(a=>reg[a]="lnk");
+  c.regionMap=reg; c.waratoms=mr.war; c.e3region=mr.e3; c.lnkatoms=lnk; c._rf=undefined;
   c.autoDecomp=false; c.manual=true;
-  const chain=mr.lnk.filter(a=>!g.ring[a]);                 // acyclic backbone atoms = linker chain
+  const chain=lnk.filter(a=>!g.ring[a]);                    // acyclic backbone atoms = linker chain
   c.desc.linker_len = chain.length;
   c.desc.linker_peg_o = chain.filter(a=>g.el[a]==="O").length;
   c.linkerChain = chain;
@@ -1161,15 +1177,24 @@ function renderChartControls(){
   ensureChartAxes();
   const flds=allChartFields();
   const opt=(sel)=>flds.map(f=>`<option value="${f.key}" ${f.key===sel?"selected":""}>${esc(f.label)}${f.unit?` (${f.unit})`:""}${f.cat?" ⋯":""}</option>`).join("");
+  const rv=v=>v==null?"":v;
   $("#chartCtrls").innerHTML=`
     <div class="field"><label>X axis</label><select id="xSel">${opt(state.chart.x)}</select></div>
+    <div class="field"><label>X scale</label><button class="btn small" id="xlogBtn" aria-pressed="${state.chart.xlog}">log₁₀</button></div>
+    <div class="field"><label>X range</label><span class="axrange"><input id="xMin" placeholder="min" value="${esc(rv(state.chart.xmin))}"><input id="xMax" placeholder="max" value="${esc(rv(state.chart.xmax))}"></span></div>
     <div class="field"><label>Y axis</label><select id="ySel">${opt(state.chart.y)}</select></div>
+    <div class="field"><label>Y scale</label><button class="btn small" id="logBtn" aria-pressed="${state.chart.log}">log₁₀</button></div>
+    <div class="field"><label>Y range</label><span class="axrange"><input id="yMin" placeholder="min" value="${esc(rv(state.chart.ymin))}"><input id="yMax" placeholder="max" value="${esc(rv(state.chart.ymax))}"></span></div>
     <div class="field"><label>Colour by</label><select id="cSel"><option value="ligase" ${state.chart.color==="ligase"?"selected":""}>E3 ligase</option><option value="series" ${state.chart.color==="series"?"selected":""}>Series</option></select></div>
-    <div class="field"><label>Y scale</label><button class="btn small" id="logBtn" aria-pressed="${state.chart.log}">log₁₀</button></div>`;
-  $("#xSel").onchange=e=>{state.chart.x=e.target.value;renderChart();};
-  $("#ySel").onchange=e=>{state.chart.y=e.target.value;state.chart.yUserSet=true;renderChart();};
+    <div class="field"><label>&nbsp;</label><button class="btn small" id="axReset" title="clear the manual ranges">Auto ranges</button></div>`;
+  $("#xSel").onchange=e=>{state.chart.x=e.target.value;state.chart.xmin=state.chart.xmax=null;renderChartControls();renderChart();};
+  $("#ySel").onchange=e=>{state.chart.y=e.target.value;state.chart.yUserSet=true;state.chart.ymin=state.chart.ymax=null;renderChartControls();renderChart();};
   $("#cSel").onchange=e=>{state.chart.color=e.target.value;renderChart();};
   $("#logBtn").onclick=e=>{state.chart.log=!state.chart.log;e.currentTarget.setAttribute("aria-pressed",state.chart.log);renderChart();};
+  $("#xlogBtn").onclick=e=>{state.chart.xlog=!state.chart.xlog;e.currentTarget.setAttribute("aria-pressed",state.chart.xlog);renderChart();};
+  const num=v=>{ v=v.trim(); return v===""?null:v; };
+  ["xMin","xMax","yMin","yMax"].forEach(id=>{ const el=$("#"+id); if(el) el.onchange=()=>{ const k=id.replace("Min","min").replace("Max","max"); state.chart[k]=num(el.value); renderChart(); }; });
+  $("#axReset").onclick=()=>{ state.chart.xmin=state.chart.xmax=state.chart.ymin=state.chart.ymax=null; renderChartControls(); renderChart(); };
 }
 function renderChart(){
   const svg=$("#chart"); const W=640,H=380, m={l:64,r:18,t:16,b:52};
@@ -1180,14 +1205,21 @@ function renderChart(){
   const pts=state.compounds.map(c=>{const rx=fieldVal(c,state.chart.x),ry=fieldVal(c,state.chart.y);return {c,rx,ry,x:toX(rx),y:toY(ry)};})
     .filter(p=>p.rx!=null&&p.ry!=null&&p.x!=null&&p.y!=null&&p.x>=0&&p.y>=0&&!isNaN(+p.x)&&!isNaN(+p.y));
   const canLog = state.chart.log && !yCat && pts.every(p=>p.y>0);
+  const canLogX = state.chart.xlog && !xCat && pts.every(p=>p.x>0);
   const yAcc = canLog? (v=>Math.log10(v)) : (v=>v);
+  const xAcc = canLogX? (v=>Math.log10(v)) : (v=>v);
   if(!pts.length){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--muted)" font-size="14">No compounds have both ${esc(xm?xm.label:state.chart.x)} and ${esc(ym?ym.label:state.chart.y)}.</text>`; $("#chartLegend").innerHTML=""; $("#chartNote").textContent=""; return; }
-  const xs=pts.map(p=>p.x), ys=pts.map(p=>yAcc(p.y));
+  const xs=pts.map(p=>xAcc(p.x)), ys=pts.map(p=>yAcc(p.y));
   let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
   if(xmin===xmax){xmin-=1;xmax+=1;} if(ymin===ymax){ymin-=1;ymax+=1;}
   if(xCat){xmin-=0.6;xmax+=0.6;} else {const p=(xmax-xmin)*0.08||0.5;xmin-=p;xmax+=p;}
   if(yCat){ymin-=0.6;ymax+=0.6;} else {const p=(ymax-ymin)*0.1||0.5;ymin-=p;ymax+=p;}
+  // manual axis ranges (entered in DATA units; blank/invalid = auto)
+  const rng=(lo,hi,acc,isLog)=>{ if(lo==null||lo===""||hi==null||hi==="") return null; lo=+lo;hi=+hi; if(isNaN(lo)||isNaN(hi)||lo>=hi||(isLog&&(lo<=0||hi<=0))) return null; return [acc(lo),acc(hi)]; };
+  const ux=xCat?null:rng(state.chart.xmin,state.chart.xmax,xAcc,canLogX); if(ux){xmin=ux[0];xmax=ux[1];}
+  const uy=yCat?null:rng(state.chart.ymin,state.chart.ymax,yAcc,canLog); if(uy){ymin=uy[0];ymax=uy[1];}
   const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const Xp=v=>X(xAcc(v));
   const Yraw=v=>H-m.b-(v-ymin)/(ymax-ymin)*(H-m.t-m.b);
   const Yp=v=>Yraw(yAcc(v));
   let g=`<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="none"/>`;
@@ -1195,21 +1227,21 @@ function renderChart(){
   const yt = yCat ? yCats.map((lab,i)=>({v:i,lab})) : niceTicks(ymin,ymax,5).map(t=>({v:t,lab:canLog?sci(Math.pow(10,t)):trim(t)}));
   yt.forEach(t=>{ const y=Yraw(t.v); g+=`<line x1="${m.l}" y1="${y}" x2="${W-m.r}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
     g+=`<text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${esc(String(t.lab))}</text>`; });
-  const xt = xCat ? xCats.map((lab,i)=>({v:i,lab})) : niceTicks(xmin,xmax,6).map(t=>({v:t,lab:trim(t)}));
+  const xt = xCat ? xCats.map((lab,i)=>({v:i,lab})) : niceTicks(xmin,xmax,6).map(t=>({v:t,lab:canLogX?sci(Math.pow(10,t)):trim(t)}));
   xt.forEach(t=>{ const x=X(t.v); g+=`<line x1="${x}" y1="${m.t}" x2="${x}" y2="${H-m.b}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
     g+=`<text x="${x}" y="${H-m.b+18}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">${esc(String(t.lab))}</text>`; });
   // axis labels
-  g+=`<text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(xm?xm.label:state.chart.x)}${xm&&xm.unit?` (${xm.unit})`:""}</text>`;
+  g+=`<text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(xm?xm.label:state.chart.x)}${xm&&xm.unit?` (${xm.unit})`:""}${canLogX?" · log₁₀":""}</text>`;
   g+=`<text transform="translate(16 ${m.t+(H-m.t-m.b)/2}) rotate(-90)" text-anchor="middle" font-size="12.5" fill="var(--ink)">${esc(ym?ym.label:state.chart.y)}${ym&&ym.unit?` (${ym.unit})`:""}${canLog?" · log₁₀":""}</text>`;
   // connect points within same series (only when both axes are numeric)
   if(!xCat&&!yCat){ const bySeries={}; pts.forEach(p=>{ (bySeries[seriesKey(p.c)] ||= []).push(p); });
     Object.entries(bySeries).forEach(([k,arr])=>{ if(arr.length<2) return; const col=seriesColorVar(arr[0].c);
       const sorted=[...arr].sort((a,b)=>a.x-b.x);
-      const dstr=sorted.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)} ${Yp(p.y).toFixed(1)}`).join(" ");
+      const dstr=sorted.map((p,i)=>`${i?"L":"M"}${Xp(p.x).toFixed(1)} ${Yp(p.y).toFixed(1)}`).join(" ");
       g+=`<path d="${dstr}" fill="none" stroke="var(${col})" stroke-width="1.6" opacity="0.4" stroke-dasharray="4 3"/>`; }); }
   // points (jitter along a categorical axis so stacked buckets don't overlap)
   pts.forEach((p,i)=>{ const col=seriesColorVar(p.c);
-    const cx=X(p.x)+(xCat?((i%5)-2)*3:0), cy=Yp(p.y)+(yCat?((i%5)-2)*3:0);
+    const cx=Xp(p.x)+(xCat?((i%5)-2)*3:0), cy=Yp(p.y)+(yCat?((i%5)-2)*3:0);
     g+=`<circle data-i="${i}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="var(${col})" stroke="var(--stage)" stroke-width="1.6"/>`;
     if(pts.length<=16) g+=`<text x="${cx}" y="${cy-9}" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="var(--f-mono)">${esc(p.c.id)}</text>`; });
   svg.innerHTML=g;
@@ -1217,8 +1249,8 @@ function renderChart(){
   const groups=[...new Set(pts.map(p=>seriesKey(p.c)))];
   $("#chartLegend").innerHTML=groups.map(k=>{ const ex=pts.find(p=>seriesKey(p.c)===k); return `<span><i style="background:var(${seriesColorVar(ex.c)})"></i>${esc(k)}</span>`; }).join("");
   // note
-  if(!xCat&&!yCat&&pts.length>2){ const r=pearson(pts.map(p=>p.x),pts.map(p=>yAcc(p.y)));
-    $("#chartNote").innerHTML=`Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog?" (log Y)":""}. ${trendText(state.chart.x,state.chart.y,r,pts.map(p=>({c:p.c,x:p.x,y:p.y})))}`; }
+  if(!xCat&&!yCat&&pts.length>2){ const r=pearson(pts.map(p=>xAcc(p.x)),pts.map(p=>yAcc(p.y)));
+    $("#chartNote").innerHTML=`Pearson r = <b class="tnum">${r.toFixed(2)}</b> across ${pts.length} compounds${canLog||canLogX?` (${[canLogX?"log X":"",canLog?"log Y":""].filter(Boolean).join(", ")})`:""}. ${trendText(state.chart.x,state.chart.y,r,pts.map(p=>({c:p.c,x:p.x,y:p.y})))}`; }
   else $("#chartNote").innerHTML=`${pts.length} compound(s) plotted${(xCat||yCat)?" · categorical axis (points jittered)":""}.`;
   // hover
   const tip=$("#tip"); const wrap=$("#chartWrap");
