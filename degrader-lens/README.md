@@ -39,6 +39,23 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v8.html`** — v7 plus **assigned stereochemistry** and **comparative examples**.
+  Every structure's **CIP configuration is extracted** (RDKit `get_stereo_tags`): the Compound panel
+  lists each stereocentre's R/S, counts **defined vs unspecified** centres (Table columns too), and
+  flags any centre left unspecified — a degrader's recruiter and warhead are configuration-specific,
+  so an unassigned centre means the active isomer isn't pinned down. A **recruiter-configuration
+  check** warns when an E3 ligand's key stereocentres are unspecified (the VHL hydroxyproline must be
+  the trans (2S,4R) isomer to bind). The **comparison engine is now stereo-aware**: after the MCS
+  atom mapping, mapped stereocentres whose R/S is inverted (or double bonds whose E/Z flips) are
+  reported as a difference, so an **epimer/diastereomer pair** — identical skeleton, zero unmapped
+  atoms — is caught and shows up in matched-molecular-pairs as a *stereochemistry* change with its
+  fold-change. Structures **read from a drawing by Claude are flagged to verify stereochemistry**
+  (wedge/hash perception is the least reliable part of OCSR). Finally, **comparative / reference /
+  control examples are pulled out of patent tables and the text**, standardised to **"Comparative
+  Example N"**, kept as a distinct namespace (so a comparative never merges with the same-numbered
+  example), badged in the gallery, and **included in the interpretation** — a comparative vs its
+  parent example is exactly the matched pair that quantifies why a change matters (the demo loader's
+  binding-dead *Comparative Example 1* pairs with *Compound 3* for a ~560× loss).
 - **`index-v7.html`** — v6 plus sharper decomposition, an SAR-interpretation tab, and a
   self-checking reader. The **linker is now strictly the contiguous chain between E3 and
   POI**: both ligands are flood-filled outward, so a ring, substituent or stray oxygen that
