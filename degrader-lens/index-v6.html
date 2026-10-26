@@ -1224,22 +1224,37 @@ function findSmilesInText(seg){
 // Compound-label patterns seen in patents/papers: "Example 12", "Examples 12",
 // "Compound 7", "Compound No. 7", "Cmpd. 7", "Cpd 7", "Compd 7", "Ex. 5", "Ex 5" —
 // with an optional "No."/"number"/"#"/":"/"." between the word and the number.
-const CMPD_LABEL="\\b(examples?|compounds?|compd|cmpd|cpd|ex)\\.?\\s*(?:nos?\\.?|number|#)?\\s*[:.]?\\s*(\\d{1,4}[a-z]?)\\b";
+// A compound label: an optional "Comparator/Reference/Control" qualifier, a keyword, an optional
+// No./number/#/:/., then the number. The qualifier is kept so a comparator never merges with a
+// same-numbered example/compound.
+const CMPD_LABEL="\\b(?:(comparator|reference|control|ref)\\s+)?(examples?|compounds?|compd|cmpd|cpd|ex)\\.?\\s*(?:nos?\\.?|number|#)?\\s*[:.]?\\s*(\\d{1,4}[a-z]?)\\b";
+// non-capturing twin, for splitting the text (capture groups in a split pattern get spliced into the result)
+const CMPD_LABEL_SPLIT="\\b(?:(?:comparator|reference|control|ref)\\s+)?(?:examples?|compounds?|compd|cmpd|cpd|ex)\\.?\\s*(?:nos?\\.?|number|#)?\\s*[:.]?\\s*\\d{1,4}[a-z]?\\b";
+// Normalise OCR / typographic variants before matching assay fields: unicode subscripts (DC₅₀),
+// and the frequent OCR of the "50" in DC50/IC50/EC50/GI50 as "so"/"5o" (e.g. "DCso", "DC5o").
+function normalizeAssayText(t){
+  return String(t||"")
+    .replace(/[₀-₉]/g, d=>"₀₁₂₃₄₅₆₇₈₉".indexOf(d))
+    .replace(/\b(dc|ic|ec|gi)\s*[5s]\s*[o0]\b/gi, "$150");
+}
 function extractPatentRecords(text){
+  text=normalizeAssayText(text);
   const rows=[];
-  const segs=text.split(new RegExp("(?="+CMPD_LABEL+")","i"));
-  const labelRe=new RegExp(CMPD_LABEL,"i");
   const conv=(v,u)=>{ v=parseFloat(v); if(!u)return v; u=u.toLowerCase(); if(u==="µm"||u==="um")return v*1000; if(u==="mm")return v*1e6; if(u==="pm")return v/1000; return v; };
-  segs.forEach(seg=>{ const idm=seg.match(labelRe); if(!idm) return;
-    const kind=/^ex/i.test(idm[1])?"Example":"Compound"; // ex/example -> Example; compound/cmpd/cpd -> Compound
-    const id=kind+" "+idm[2].toUpperCase();
+  // Find each label as a full (non-overlapping) match, then take the text up to the next label as its
+  // segment. This keeps a "Comparator Example 1" together instead of splitting it into "Example 1".
+  const re=new RegExp(CMPD_LABEL,"gi"); const hits=[]; let mm;
+  while((mm=re.exec(text))){ hits.push({idx:mm.index, comp:!!mm[1], kw:mm[2], num:mm[3]}); if(re.lastIndex===mm.index) re.lastIndex++; }
+  hits.forEach((h,i)=>{ const seg=text.slice(h.idx, i+1<hits.length?hits[i+1].idx:text.length);
+    const base=/^ex/i.test(h.kw)?"Example":"Compound"; // ex/example -> Example; compound/cmpd/cpd -> Compound
+    const id=(h.comp?"Comparator ":"")+base+" "+h.num.toUpperCase();
     const data={};
     const dc=seg.match(/dc\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(dc)data.dc50_nm=conv(dc[1],dc[2]);
     const ic=seg.match(/ic\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ic)data.target_ic50_nm=conv(ic[1],ic[2]);
     const ec=seg.match(/ec\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ec)data.ec50_nm=conv(ec[1],ec[2]);
     const ki=seg.match(/\bki\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(ki)data.ki_nm=conv(ki[1],ki[2]);
     const kd=seg.match(/\bkd\b[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(kd)data.kd_nm=conv(kd[1],kd[2]);
-    const dmax=seg.match(/d\s*max[^0-9]{0,10}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
+    const dmax=seg.match(/d\s*max[^0-9]{0,12}([0-9.]+)\s*%?/i); if(dmax)data.dmax_pct=parseFloat(dmax[1]);
     const gi=seg.match(/gi\s*50[^0-9]{0,10}([0-9.]+)\s*(nm|µm|um|pm|mm)?/i); if(gi)data.gi50_nm=conv(gi[1],gi[2]);
     const inh=seg.match(/([0-9.]+)\s*%\s*(?:inhibition|inhib)/i); if(inh)data.pct_inhibition=parseFloat(inh[1]);
     // qualitative / bucketed potency: (+++), "activity: ++", or a lone run of 2-4 plus signs
@@ -1248,10 +1263,19 @@ function extractPatentRecords(text){
         || seg.match(/(?:^|[\s|])(\+{2,4})(?=[\s|),;]|$)/);
     if(bk && !("dc50_nm" in data) && !("target_ic50_nm" in data)) data.potency=bk[1].toUpperCase();
     const smiles=findSmilesInText(seg);
-    if(Object.keys(data).length||smiles) rows.push({id,name:id,series:"patent/paper",smiles,data}); });
+    if(Object.keys(data).length||smiles) rows.push({id,name:id,series:h.comp?"patent/paper · comparator":"patent/paper",smiles,data}); });
   return rows; }
+// How many distinct compound numbers are mentioned at all (even with no assay data in the text) —
+// used to tell "this doc has compounds but their data is in tables/figures" from "no compounds here".
+function countCompoundLabels(text){
+  const re=new RegExp(CMPD_LABEL,"gi"), keys=new Set(); let m; const t=normalizeAssayText(text);
+  while((m=re.exec(t))){ const base=/^ex/i.test(m[2])?"Example":"Compound"; keys.add(cmpdKey((m[1]?"Comparator ":"")+base+" "+m[3])); }
+  return keys.size;
+}
 // Target / protein-of-interest (POI) detection from the document text.
-const KNOWN_TARGETS = ["BRD4","BRD9","BRD2","BRD3","BRD7","BET","androgen receptor","AR","estrogen receptor","ER","BTK","BCL6","BCL-XL","BCL2","EGFR","ALK","CDK2","CDK4","CDK6","CDK9","CDK12","STAT3","STAT5","IRAK4","IRAK3","SMARCA2","SMARCA4","KRAS","FAK","FAK1","BRAF","HDAC6","HDAC1","WDR5","WEE1","PARP1","PARP14","MDM2","MCL1","MCL-1","TRK","NTRK","FLT3","JAK2","PTK2","MET","RIPK2","TBK1","SIRT2","TAU","MAPT","PCSK9","IDO1","HPK1","CBP","p300","EP300","MLL","KEAP1","NAMPT","PLK1","AKT","PI3K","mTOR","BCR-ABL","ABL","B7-H3","CDK8","NSD3","FKBP12","DHODH","GSPT1","IKZF1","IKZF2","IKZF3","CK1","RBM39","SALL4"];
+const KNOWN_TARGETS = ["BRD4","BRD9","BRD2","BRD3","BRD7","BET","androgen receptor","AR","estrogen receptor","ER","BTK","BCL6","BCL-XL","BCL2","EGFR","ALK","CDK2","CDK4","CDK6","CDK9","CDK12","STAT3","STAT5","IRAK4","IRAK3","SMARCA2","SMARCA4","KRAS","FAK","FAK1","BRAF","HDAC6","HDAC1","WDR5","WEE1","PARP1","PARP14","MDM2","MCL1","MCL-1","TRK","NTRK","FLT3","JAK2","JAK1","TYK2","MET","RIPK2","TBK1","SIRT2","TAU","MAPT","PCSK9","IDO1","HPK1","CBP","p300","EP300","MLL","KEAP1","NAMPT","PLK1","AKT","PI3K","mTOR","BCR-ABL","ABL","B7-H3","CDK8","NSD3","FKBP12","DHODH","GSPT1","IKZF1","IKZF2","IKZF3","CK1","RBM39","SALL4",
+  // neurodegeneration / CNS degrader targets and more recent PROTAC/glue targets
+  "LRRK2","alpha-synuclein","α-synuclein","SNCA","huntingtin","HTT","TDP-43","TDP43","TARDBP","SOD1","PRMT5","WRN","SMARCA5","MYC","MYB","CBP/p300","KAT6A","MEK","MEK1","MEK2","ERK","ERK1","ERK2","RAF1","CRAF","SOS1","SHP2","PTPN11","WIZ","CDK7","AURKA","AURKB","PLK4","MELK","HER2","ERBB2","HDAC3","HDAC8","EZH2","BRD7","PBRM1","ARID1A","FGFR1","FGFR2","FGFR3","RET","ROS1","CBL-B","CBLB","ITK","LCK","SYK","ZAP70","MALT1","CARD9","STING","TMEM173","NLRP3","G12D","G12C","G12V","KRASG12D","PDE","GPX4","FER","CSNK1A1","VAV1"];
 function detectTargets(text){
   if(!text) return [];
   const hits=new Set();
@@ -1319,12 +1343,18 @@ async function extractFromPDFClient(file){
     // "nothing readable" message — say what the text gave and that structure+data reading is starting.
     if(rows.length){
       setStatus(`✓ Text pass: ${rows.length} compound(s), ${withData} with assay data, ${withStruct} with a structure${tg.length?` · target ${esc(tg.join(", "))}`:""}.${visionOn?" Now reading the pages with Claude for structures + any data in the drawings/tables…":" Shown in the Table; open SAR to plot."}`, true);
-    } else if(visionOn){
-      setStatus(`${scanned?`Scanned PDF — no machine-readable text (${pdf.numPages} page(s)).`:`No compound numbers in the text (${pdf.numPages} page(s)).`} Reading the pages with Claude for structures + biological data…`, true);
     } else {
-      setStatus(scanned
-        ? `This PDF has little or no machine-readable text (${textChars.toLocaleString()} characters over ${pdf.numPages} page(s)) — it looks like scanned pages or vector drawings. ${visionHint}`
-        : `Read ${pdf.numPages} page(s) (${textChars.toLocaleString()} characters) but found no compound or example numbers. It may label compounds in a way I don't recognise — paste a sample line below, or ${visionHint.charAt(0).toLowerCase()+visionHint.slice(1)}`, false);
+      // No assay data in the text. Distinguish three cases so the guidance is actionable.
+      const nLabels = countCompoundLabels(text);
+      if(visionOn){
+        setStatus(`${scanned?`Scanned PDF — no machine-readable text (${pdf.numPages} page(s)).`:nLabels?`Found ${nLabels} compound number(s) in the text but their activity data is in tables/figures (images).`:`No compound numbers in the text (${pdf.numPages} page(s)).`} Reading the pages with Claude for structures + biological data…`, true);
+      } else if(nLabels){
+        setStatus(`Found ${nLabels} compound number(s) in the text, but the activity data (DC₅₀/Dmax etc.) and structures are in tables/figures, not text — so there's nothing to tabulate from text alone. ${visionHint.replace("drawn structures","the result tables + structures")}`, false);
+      } else {
+        setStatus(scanned
+          ? `This PDF has little or no machine-readable text (${textChars.toLocaleString()} characters over ${pdf.numPages} page(s)) — it looks like scanned pages or vector drawings. ${visionHint}`
+          : `Read ${pdf.numPages} page(s) (${textChars.toLocaleString()} characters) but found no compound or example numbers. It may label compounds in a way I don't recognise — paste a sample line below, or ${visionHint.charAt(0).toLowerCase()+visionHint.slice(1)}`, false);
+      }
     }
     // Show the data/structures as they populate — go to the Table whenever there is or will be content.
     if((rows.length || visionOn) && state.tab==="data") switchTab("table");
@@ -1356,11 +1386,13 @@ async function extractFromPDFClient(file){
 }
 function normId(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
 // Merge key so one compound is counted once however it is labelled: "Compound 9", "Example 9",
-// "Cpd. 9" and a bare "9" (e.g. a biological-data table row) all key to "9". A non-numbered
-// label (a code like "VHL-1") keeps its full normalised form so unrelated ones never collide.
+// "Cpd. 9" and a bare "9" (e.g. a biological-data table row) all key to "9". A "Comparator/
+// Reference" compound keys to "cmp:9", so a reference never merges with the example of the same
+// number. A non-numbered label (a code like "VHL-1") keeps its full normalised form.
 function cmpdKey(id){ const s=String(id||"").trim();
-  const m=s.match(/^(?:examples?|compounds?|compd|cmpd|cpd|ex)?\s*\.?\s*(?:nos?\.?|number|#)?\s*(\d{1,4}[a-z]?)$/i);
-  return m ? m[1].toLowerCase() : normId(s); }
+  const comp=/^(comparator|reference|control|ref)\b/i.test(s);
+  const m=s.match(/^(?:(?:comparator|reference|control|ref)\s+)?(?:examples?|compounds?|compd|cmpd|cpd|ex)?\s*\.?\s*(?:nos?\.?|number|#)?\s*(\d{1,4}[a-z]?)$/i);
+  return m ? (comp?"cmp:":"")+m[1].toLowerCase() : normId(s); }
 async function pageHasGraphics(pdf,n){
   try{ const page=await pdf.getPage(n); const ops=await page.getOperatorList(); const O=pdfjsLib.OPS;
     let img=0,paths=0;
@@ -1495,13 +1527,15 @@ async function visionScanPdf(pdf, pages, ctl){
 /* ============================ Claude vision OCSR (in-browser) ============================ */
 const OCSR_PROMPT = `You are an expert cheminformatician reading ONE page image from a medicinal-chemistry patent or paper about targeted protein degraders (PROTACs) or molecular glues. The page may show chemical structure drawings, a table of biological data, or both. This is often a scanned page, so read the text in the image too.
 
-Return ONLY a JSON array, one element per distinct numbered compound you can identify on this page (by its printed label, e.g. "Example 12", "Compound 7"):
+If the page is a RESULTS TABLE (rows of compound numbers with activity values), read EVERY row — return one element per row. The assay type and unit usually come from the COLUMN HEADER (e.g. a "DC50 (nM)" or "Dmax (%)" column), so apply that header's meaning and unit to every value in that column. Compound labels in such tables are often just the bare number (e.g. "12", "12a") — that is the id. Read subscripts carefully ("DC₅₀" is DC50).
+
+Return ONLY a JSON array, one element per distinct numbered compound you can identify on this page (by its printed label, e.g. "Example 12", "Compound 7", or a bare "12" in a table row):
 [{"id": <string|null>, "smiles": <string|null>, "formula": <string|null>, "confidence": "high"|"medium"|"low", "data": {}}]
-- "id": the compound/example label printed next to the structure or in the table row (e.g. "Example 12", "Compound 7"), else null.
+- "id": the compound/example label next to the structure or in the table row (e.g. "Example 12", "Compound 7", "12"), else null.
 - "smiles": a valid SMILES ONLY if a chemical STRUCTURE for this compound is DRAWN on this page. Include stereochemistry (@, @@, /, \\) where drawn; expand only abbreviations you are sure of (Boc, Ph, OMe, OtBu). Do not invent atoms you cannot see. Use null if this page only lists the compound in a table (no drawing).
 - "formula": molecular formula of your SMILES in Hill order (e.g. "C34H38N6O7") to cross-check it; null if no structure.
 - "confidence": how sure the SMILES matches the drawing ("low" if there is no structure).
-- "data": an object with any BIOLOGICAL ASSAY values shown for this compound on this page. Use these keys where applicable and OMIT keys you do not see: dc50_nm, ic50_nm, ec50_nm, ki_nm, kd_nm, dmax_pct, gi50_nm, pct_inhibition — all CONCENTRATIONS in nM (convert µM→nM ×1000, pM→nM ÷1000; a percentage like Dmax or % inhibition stays a percent) — and "potency" for a qualitative bucket such as "+", "++", "+++" or a letter grade. Use {} if no assay values are shown.
+- "data": an object with any BIOLOGICAL ASSAY values shown for this compound on this page (including values read from a results-table row). Use these keys where applicable and OMIT keys you do not see: dc50_nm, ic50_nm, ec50_nm, ki_nm, kd_nm, dmax_pct, gi50_nm, pct_inhibition — all CONCENTRATIONS in nM (convert µM→nM ×1000, pM→nM ÷1000; a percentage like Dmax or % inhibition stays a percent) — and "potency" for a qualitative bucket such as "+", "++", "+++", a letter grade, or a binned value like "A"/"B"/"C" (give the symbol as written). If a value is a range or a ">"/"<" bound, give the number only (e.g. ">1000" -> 1000). Use {} if no assay values are shown. Do NOT treat synthesis details — yield %, purity %, mass (mg), or amount (mmol/µmol) — as assay data.
 ONLY include numbered, final example/claimed compounds. SKIP synthetic intermediates, reagents, building blocks, starting materials, linkers on their own, protecting-group fragments, and reference/comparator compounds.
 If the page shows no such compounds, return []. No text outside the JSON array.`;
 
