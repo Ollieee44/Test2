@@ -548,10 +548,11 @@ function parseGraph(molblock){
   const counts=lines[3];
   const na=parseInt(counts.slice(0,3),10), nb=parseInt(counts.slice(3,6),10);
   const el=[]; for(let i=0;i<na;i++){ el.push(lines[4+i].slice(31,34).trim()); }
-  const adj=Array.from({length:na},()=>[]); const bonds=[];
+  const adj=Array.from({length:na},()=>[]); const bo=Array.from({length:na},()=>[]); const bonds=[];
   for(let i=0;i<nb;i++){ const L=lines[4+na+i];
     const a=parseInt(L.slice(0,3),10)-1, b=parseInt(L.slice(3,6),10)-1;
-    adj[a].push(b); adj[b].push(a); bonds.push([a,b]); }
+    const order=parseInt(L.slice(6,9),10)||1;              // bond type (1/2/3, 4=aromatic)
+    adj[a].push(b); adj[b].push(a); bo[a].push(order); bo[b].push(order); bonds.push([a,b,order]); }
   // bridge detection (iterative DFS) -> ring atoms = incident to any non-bridge bond
   const disc=new Array(na).fill(-1), low=new Array(na).fill(0), ring=new Array(na).fill(false);
   let t=0;
@@ -571,7 +572,7 @@ function parseGraph(molblock){
       }
     }
   }
-  return {na,el,adj,bonds,ring};
+  return {na,el,adj,bo,bonds,ring};
 }
 // multi-source BFS shortest path from any atom in A to any atom in B; returns full path (incl ends)
 function shortestPath(adj,setA,setB){
@@ -592,6 +593,22 @@ function graphDiameter(g){ const na=g.na; if(na<=1) return 0; let diam=0;
   for(let s=0;s<na;s++){ const dist=new Array(na).fill(-1); dist[s]=0; const q=[s];
     for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of g.adj[u]) if(dist[v]<0){ dist[v]=dist[u]+1; q.push(v); if(dist[v]>diam) diam=dist[v]; } } }
   return diam; }
+// Span of a subset = longest shortest-path (bonds) between any two of its atoms, +1 => atoms across.
+// For a linker this is the distance between its two extremes (through any ring, not a headcount).
+function spanOfAtoms(g, atoms){ if(!atoms||atoms.length<=1) return (atoms&&atoms.length)?1:0;
+  let best=0;
+  for(const s of atoms){ const dist=new Array(g.na).fill(-1); dist[s]=0; const q=[s];
+    for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of g.adj[u]) if(dist[v]<0){ dist[v]=dist[u]+1; q.push(v); } }
+    for(const t of atoms){ if(dist[t]>best) best=dist[t]; } }
+  return best+1; }
+// Inter-region span = longest shortest-path between an atom of A and an atom of B, +1 => atoms across.
+// Used for total PROTAC length: the fully-extended reach from the POI (warhead) end to the E3 end.
+function interRegionSpan(g, A, B){ if(!A.length||!B.length) return 0;
+  const [src,dst]= A.length<=B.length ? [A,new Set(B)] : [B,new Set(A)]; let best=-1;
+  for(const s of src){ const dist=new Array(g.na).fill(-1); dist[s]=0; const q=[s];
+    for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of g.adj[u]) if(dist[v]<0){ dist[v]=dist[u]+1; q.push(v); } }
+    for(let t=0;t<g.na;t++){ if(dst.has(t)&&dist[t]>best) best=dist[t]; } }
+  return best<0?0:best+1; }
 
 // core per-compound analysis (creates a mol from canonical smiles, computes everything, frees it)
 // Scaffold-free decomposition: warhead = the ligand farthest from the E3 anchor across
@@ -632,7 +649,6 @@ function analyse(raw){
     };
     out.desc.hbd=pick("NumHBD","lipinskiHBD"); // ensure correct
     const graph=parseGraph(m.get_molblock());
-    out.desc.span=graphDiameter(graph)+1; // total length = atoms spanned by the two most distal atoms
     // E3 detection
     out.e3=null; out.e3atoms=[];
     for(let i=0;i<state.qmolAnchors.length;i++){ const q=state.qmolAnchors[i]; if(!q) continue;
@@ -659,6 +675,11 @@ function analyse(raw){
     // region atom map; linker is written last so the boundary atoms read as linker
     const reg={}; out.waratoms.forEach(a=>reg[a]="war"); e3region.forEach(a=>reg[a]="e3"); out.lnkatoms.forEach(a=>reg[a]="lnk");
     out.e3region=e3region; out.regionMap=reg;
+    // lengths as through-bond spans (atoms), not raw headcounts
+    if(out.lnkatoms.length) out.desc.linker_len = spanOfAtoms(graph, out.lnkatoms);
+    out.desc.span = (out.waratoms.length && e3region.length)
+      ? interRegionSpan(graph, out.waratoms, e3region)   // POI end ↔ E3 end
+      : graphDiameter(graph)+1;                          // no warhead defined: fall back to diameter
     out.isGlue = (out.e3 && out.lnkatoms.length===0 && out.waratoms.length===0);
     out.na=graph.na;
   }catch(e){ out.valid=false; out.error="Analysis failed: "+e.message; }
@@ -811,9 +832,11 @@ function applyManualRegions(c){
   c.regionMap=reg; c.waratoms=mr.war; c.e3region=mr.e3; c.lnkatoms=lnk; c._rf=undefined;
   c.autoDecomp=false; c.manual=true;
   const chain=lnk.filter(a=>!g.ring[a]);                    // acyclic backbone atoms = linker chain
-  c.desc.linker_len = chain.length;
+  c.desc.linker_len = lnk.length ? spanOfAtoms(g, lnk) : 0; // span between the two extremes of the region
   c.desc.linker_peg_o = chain.filter(a=>g.el[a]==="O").length;
   c.linkerChain = chain;
+  c.desc.span = (mr.war.length && mr.e3.length)             // total length = POI end ↔ E3 end
+    ? interRegionSpan(g, mr.war, mr.e3) : graphDiameter(g)+1;
 }
 
 /* ===================== med-chem SAR interpretation engine ===================== */
@@ -828,32 +851,110 @@ function regionFrags(c){ if(c._rf!==undefined) return c._rf;
   const f=sel=>sel.length? (fragmentSmiles(c.smiles, sel.slice().sort((x,y)=>x-y))||"") : "";
   return (c._rf={war:f(war),e3:f(e3),lnk:f(lnk),warN:war.length,e3N:e3.length,lnkN:lnk.length});
 }
-// Morgan-like atom-environment signatures (radius r) — used to diff two structures without MCS
-function envSigs(smiles,r){ return withMol(smiles,m=>{ const g=parseGraph(m.get_molblock());
-  let sig=g.el.slice();
-  for(let it=0;it<r;it++){ sig=sig.map((s,a)=>{ const nb=g.adj[a].map(v=>sig[v]).sort(); return s+"{"+nb.join(".")+"}"; }); }
-  return {sig,el:g.el,na:g.na}; }) || null; }
-// atoms of each molecule whose radius-r environment has no match in the other = the structural difference
-function structuralDiff(smA,smB,r){ r=r||3; const A=envSigs(smA,r),B=envSigs(smB,r); if(!A||!B) return null;
-  const cnt=a=>{const m={};a.forEach(s=>m[s]=(m[s]||0)+1);return m;};
-  const bB=cnt(B.sig), bA=cnt(A.sig);
-  const aDiff=[]; A.sig.forEach((s,i)=>{ if(bB[s]>0) bB[s]--; else aDiff.push(i); });
-  const bDiff=[]; B.sig.forEach((s,i)=>{ if(bA[s]>0) bA[s]--; else bDiff.push(i); });
-  return {aDiff,bDiff,aNa:A.na,bNa:B.na}; }
-// matched molecular pairs: compounds that share 2 of the 3 regions and differ in exactly one
+// Bond-order-aware atom-environment signatures at every radius 0..R (sigAt[r][atom]).
+// Element at r0; each step folds in neighbours tagged by bond order, so connectivity (and
+// therefore the POSITION of a group along a chain) changes the signature — unlike a plain
+// element multiset, which a moved substituent leaves unchanged.
+function atomSigsAll(g, R){
+  let cur=g.el.slice(); const out=[cur];
+  for(let it=1; it<=R; it++){
+    const next=cur.map((s,a)=>{ const nb=g.adj[a].map((v,k)=>g.bo[a][k]+cur[v]).sort(); return s+"["+nb.join(",")+"]"; });
+    out.push(next); cur=next;
+  }
+  return out;
+}
+// Greedy connected maximum-common-subgraph atom mapping A->B. Seeds from the most distinctive
+// matching atoms (rarest high-radius signature) and grows along bonds, requiring equal bond order
+// and compatible environment; keeps the largest mapping over several seeds. Atoms left unmapped
+// are the real structural difference — this catches regioisomers and a group moved along a chain,
+// which a signature multiset cannot. RDKit.js here has no native MCS, hence this JS fallback.
+function mcsMap(gA, gB){
+  const R=4;
+  const sA=atomSigsAll(gA,R), sB=atomSigsAll(gB,R);
+  const agree=(a,b)=>{ if(sA[0][a]!==sB[0][b]) return -1; let r=0; while(r<R && sA[r+1][a]===sB[r+1][b]) r++; return r; };
+  // grow a mapping from one or more fixed seed pairs, filling in along bonds
+  const grow=(initPairs)=>{
+    const M=new Map(), used=new Set(), q=[];
+    for(const [a,b] of initPairs){ if(M.has(a)||used.has(b)) continue; M.set(a,b); used.add(b); q.push([a,b]); }
+    for(let h=0;h<q.length;h++){ const [a,b]=q[h];
+      for(let k=0;k<gA.adj[a].length;k++){ const an=gA.adj[a][k]; if(M.has(an)) continue; const ord=gA.bo[a][k];
+        let pick=-1, pickR=-1;
+        for(let kk=0;kk<gB.adj[b].length;kk++){ const bn=gB.adj[b][kk]; if(used.has(bn)||gB.bo[b][kk]!==ord) continue;
+          const r=agree(an,bn); if(r>pickR){ pickR=r; pick=bn; } }
+        if(pick>=0){ M.set(an,pick); used.add(pick); q.push([an,pick]); } } }
+    return M;
+  };
+  let best=new Map();
+  // confident anchors: a top-radius signature that is unique on BOTH sides is an unambiguous
+  // correspondence. Seeding growth from ALL of them at once pins every distinctive region (both
+  // ligands of a degrader), so the only unmapped atoms are the real change between the two — a
+  // single seed would frame-shift along a repetitive linker and lose a whole ligand.
+  const cntA={}, cntB={}, firstB={};
+  for(let a=0;a<gA.na;a++) cntA[sA[R][a]]=(cntA[sA[R][a]]||0)+1;
+  for(let b=0;b<gB.na;b++){ const s=sB[R][b]; cntB[s]=(cntB[s]||0)+1; if(firstB[s]===undefined) firstB[s]=b; }
+  const anchors=[];
+  for(let a=0;a<gA.na;a++){ const s=sA[R][a]; if(cntA[s]===1&&cntB[s]===1) anchors.push([a,firstB[s]]); }
+  if(anchors.length){ const m=grow(anchors); if(m.size>best.size) best=m; }
+  // single-seed attempts (rarest first) — covers pairs with no unique anchors (e.g. a symmetric
+  // chain) and recovers anything the anchor pass left unmapped.
+  if(best.size<Math.min(gA.na,gB.na)){
+    const byTop={}; for(let b=0;b<gB.na;b++){ (byTop[sB[R][b]]=byTop[sB[R][b]]||[]).push(b); }
+    const seeds=[];
+    for(let a=0;a<gA.na;a++){ const list=byTop[sA[R][a]]; if(list) for(const b of list) seeds.push({a,b,rar:list.length}); }
+    if(!seeds.length){ for(let a=0;a<gA.na;a++) for(let b=0;b<gB.na;b++) if(gA.el[a]===gB.el[b]) seeds.push({a,b,rar:gB.na}); }
+    seeds.sort((x,y)=>x.rar-y.rar);
+    const lim=Math.min(seeds.length,40), tried=new Set();
+    for(let i=0;i<lim&&best.size<Math.min(gA.na,gB.na);i++){ const s=seeds[i]; const key=s.a+","+s.b; if(tried.has(key)) continue; tried.add(key);
+      const m=grow([[s.a,s.b]]); if(m.size>best.size) best=m; }
+  }
+  return best;
+}
+// Structural difference between two molecules = atoms with no counterpart in the MCS mapping.
+function structuralDiff(smA,smB){
+  const gA=withMol(smA,m=>parseGraph(m.get_molblock()));
+  const gB=withMol(smB,m=>parseGraph(m.get_molblock()));
+  if(!gA||!gB) return null;
+  const M=mcsMap(gA,gB); const usedB=new Set(M.values());
+  const aDiff=[]; for(let a=0;a<gA.na;a++) if(!M.has(a)) aDiff.push(a);
+  const bDiff=[]; for(let b=0;b<gB.na;b++) if(!usedB.has(b)) bDiff.push(b);
+  return {aDiff,bDiff,aNa:gA.na,bNa:gB.na,mapped:M.size}; }
+// Dominant decomposition region of a set of changed atoms (best-effort, inherits any decomp error).
+function regionOfDiff(a,atomsA,b,atomsB){
+  const tally={war:0,e3:0,lnk:0};
+  const add=(c,atoms)=>{ if(!c.regionMap||!atoms) return; atoms.forEach(x=>{ const r=c.regionMap[x]; if(r) tally[r]++; }); };
+  add(a,atomsA); add(b,atomsB);
+  let k=null,v=-1; for(const key of ["war","e3","lnk"]) if(tally[key]>v){ v=tally[key]; k=key; }
+  return v<=0 ? null : {war:"warhead",e3:"E3 ligand",lnk:"linker"}[k];
+}
+// Matched molecular pairs: compounds that differ in only a small, localised part of the structure,
+// found from the actual MCS difference (NOT from fragment-string equality, which inherits any
+// decomposition error). The region label is a best-effort annotation of where the changed atoms sit,
+// flagged "auto" when the decomposition wasn't user-verified — so a mislabelled linker no longer
+// silently turns a warhead change into a "linker" change.
 function matchedRegionPairs(){
-  const cs=state.compounds.filter(c=>c.valid&&regionFrags(c)&&potencyOf(c));
+  const cs=state.compounds.filter(c=>c.valid&&c.smiles&&potencyOf(c));
   const out=[];
+  const useMCS=cs.length<=45;   // O(n²) MCS; fall back to fast fragment pairing on large sets
   for(let i=0;i<cs.length;i++) for(let j=i+1;j<cs.length;j++){
-    const a=cs[i],b=cs[j],fa=regionFrags(a),fb=regionFrags(b);
-    if(!fa||!fb) continue;
-    const same={war:fa.war&&fa.war===fb.war, e3:fa.e3&&fa.e3===fb.e3, lnk:fa.lnk&&fa.lnk===fb.lnk};
-    const n=(same.war?1:0)+(same.e3?1:0)+(same.lnk?1:0);
-    if(n!==2) continue;
+    const a=cs[i],b=cs[j];
     const pa=potencyOf(a),pb=potencyOf(b); if(pa.key!==pb.key) continue;
-    const region=!same.war?"warhead":!same.e3?"E3 ligand":"linker";
+    let region,approx=false,diffA=null,diffB=null,nd=null;
+    if(useMCS){
+      const d=structuralDiff(a.smiles,b.smiles); if(!d) continue;
+      nd=d.aDiff.length+d.bDiff.length; if(nd===0) continue;            // identical structures
+      const minNa=Math.min(d.aNa,d.bNa);
+      if(nd>Math.max(16,minNa*0.5)) continue;                           // too different to be a matched pair
+      diffA=d.aDiff; diffB=d.bDiff;
+      region=regionOfDiff(a,diffA,b,diffB);
+      approx=!(a.userDefined&&b.userDefined);                          // region is auto-annotated
+    } else {
+      const fa=regionFrags(a),fb=regionFrags(b); if(!fa||!fb) continue;
+      const same={war:fa.war&&fa.war===fb.war,e3:fa.e3&&fa.e3===fb.e3,lnk:fa.lnk&&fa.lnk===fb.lnk};
+      if((same.war?1:0)+(same.e3?1:0)+(same.lnk?1:0)!==2) continue;
+      region=!same.war?"warhead":!same.e3?"E3 ligand":"linker"; approx=!(a.userDefined&&b.userDefined);
+    }
     const better=pa.val<=pb.val?a:b, worse=pa.val<=pb.val?b:a;
-    out.push({a,b,region,better,worse,pa,pb,fold:foldChange(pa.val,pb.val),key:pa.key});
+    out.push({a,b,region,approx,nd,diffA,diffB,better,worse,pa,pb,fold:foldChange(pa.val,pb.val),key:pa.key});
   }
   out.sort((x,y)=>(y.fold||0)-(x.fold||0));
   return out;
@@ -1069,10 +1170,10 @@ function renderDetail(){
         <button class="rbig" data-reg="e3" ${arr.length?"":"disabled"}><span class="sw" style="background:var(--reg-e3)"></span>This is the <b>E3 ligand</b></button>
         <button class="rbig" data-reg="lnk" ${arr.length?"":"disabled"}><span class="sw" style="background:var(--reg-lnk)"></span>This is the <b>Linker</b></button>
       </div>
-      <div class="region-status">Warhead ${stat('war')} · E3 ${stat('e3')} · Linker chain <b>${c.desc.linker_len!=null?c.desc.linker_len+" atoms":""}</b>
+      <div class="region-status">Warhead ${stat('war')} · E3 ${stat('e3')} · Linker length <b>${c.desc.linker_len!=null?c.desc.linker_len+" atoms":""}</b>
         <button class="btn small" id="linkEnds" title="select the two linker ends">Linker from 2 ends</button>
         ${c.manual?`<button class="btn small" id="resetRegions">Reset to auto</button>`:""}</div>
-      <p class="help">The <b>linker is everything that isn't the warhead or the E3</b> — define those two and the rest fills in automatically. <b>Linker length</b> is the chain between them (the backbone atoms on the path from warhead to E3), not the total count of linker atoms.</p>
+      <p class="help">The <b>linker is everything that isn't the warhead or the E3</b> — define those two and the rest fills in automatically. <b>Linker length</b> is the span between the linker region's two extremes — the through-bond distance from the end that abuts the warhead to the end that abuts the E3 (in atoms), so a ring in the linker counts as its path length, not every ring atom. <b>Total length</b> is the full POI-end-to-E3-end reach.</p>
       ${tkeys.length?`<div class="apply-all"><div class="inline" style="gap:6px"><button class="btn small primary" id="applyAll">Apply ${defsSummary} to all ${nValid} compounds</button><button class="btn small" id="clearTpl">Clear definitions</button></div><div class="help" style="margin-top:4px">Matches your E3/POI core(s) — plus the built-in E3-ligase library — on every compound. Rings and substituents hanging off a core stay with that ligand even if they vary; only the chain <i>between</i> E3 and POI becomes the linker. Define each variant once on an example.</div></div>`:""}`;
     const cp=$("#selCopy"); if(cp)cp.onclick=e=>copyText(frag,e.currentTarget);
     const sc=$("#selClear"); if(sc)sc.onclick=()=>{ sel.clear(); renderStruct(); renderSelBar(); };
@@ -1870,8 +1971,11 @@ function renderInterpret(){
   // matched molecular pairs
   const mmp=matchedRegionPairs(), mo=$("#mmpOut");
   if(mo){ if(!mmp.length){ mo.innerHTML=`<p class="help">Need ≥2 decomposed compounds that share two regions and report the same potency assay. Load structures + data and set the warhead/E3 (or push a definition to all compounds).</p>`; }
-    else { mo.innerHTML=mmp.slice(0,30).map(p=>{ const reg=p.region==="warhead"?"war":p.region==="E3 ligand"?"e3":"lnk";
-      return `<div class="mmp-row" data-a="${esc(p.a.id)}" data-b="${esc(p.b.id)}"><div><b>${esc(p.a.id)}</b> vs <b>${esc(p.b.id)}</b> · <span class="pill ${reg}">${p.region} differs</span></div><div><span class="${p.fold&&p.fold>1.5?'fold-up':''}">${fmtFold(p.fold)}</span> <span class="help">${esc(p.better.id)} wins</span></div></div>`;
+    else { mo.innerHTML=mmp.slice(0,30).map(p=>{ const reg=p.region==="warhead"?"war":p.region==="E3 ligand"?"e3":p.region==="linker"?"lnk":"";
+      const label= p.region? `${p.region} differs` : "differs";
+      const flag= p.approx? ` <span class="help" title="region inferred from automatic decomposition — verify by setting the warhead/E3">(auto — verify)</span>`:"";
+      const nd= p.nd!=null? ` <span class="help">${p.nd} atom${p.nd===1?"":"s"}</span>`:"";
+      return `<div class="mmp-row" data-a="${esc(p.a.id)}" data-b="${esc(p.b.id)}"><div><b>${esc(p.a.id)}</b> vs <b>${esc(p.b.id)}</b> · <span class="pill ${reg}">${label}</span>${flag}${nd}</div><div><span class="${p.fold&&p.fold>1.5?'fold-up':''}">${fmtFold(p.fold)}</span> <span class="help">${esc(p.better.id)} wins</span></div></div>`;
     }).join("")+(mmp.length>30?`<p class="help">…and ${mmp.length-30} more.</p>`:"");
       mo.querySelectorAll(".mmp-row").forEach(r=>r.onclick=()=>{ selA.value=r.dataset.a; selB.value=r.dataset.b; renderCompare(); });
     }
@@ -1898,23 +2002,26 @@ function renderCompare(){
   const a=state.compounds.find(c=>c.id===($("#cmpA")&&$("#cmpA").value)), b=state.compounds.find(c=>c.id===($("#cmpB")&&$("#cmpB").value));
   if(!a||!b||!a.valid||!b.valid){ out.innerHTML=`<p class="help">Pick two compounds with structures to see what differs.</p>`; return; }
   if(a.id===b.id){ out.innerHTML=`<p class="help">Pick two different compounds.</p>`; return; }
-  const diff=structuralDiff(a.smiles,b.smiles,3); const aH=diff?diff.aDiff:[], bH=diff?diff.bDiff:[];
+  const diff=structuralDiff(a.smiles,b.smiles); const aH=diff?diff.aDiff:[], bH=diff?diff.bDiff:[];
   const pa=potencyOf(a), pb=potencyOf(b);
   let delta="";
   if(pa&&pb&&pa.key===pb.key){ const f=foldChange(pa.val,pb.val), better=pa.val<=pb.val?a:b;
     delta=`<div class="insight"><b>${esc(a.id)}</b> ${pa.label} ${fmtNum(pa.val,1)} vs <b>${esc(b.id)}</b> ${fmtNum(pb.val,1)} — <b>${esc(better.id)}</b> is <span class="fold-up">${fmtFold(f)}</span> more potent.</div>`;
   } else if(pa||pb){ delta=`<div class="insight">${pa?`${esc(a.id)}: ${pa.label} ${fmtNum(pa.val,1)}`:`${esc(a.id)}: no potency value`} · ${pb?`${esc(b.id)}: ${pb.label} ${fmtNum(pb.val,1)}`:`${esc(b.id)}: no potency value`}</div>`; }
-  let regionNote=""; const fa=regionFrags(a), fb=regionFrags(b);
-  if(fa&&fb){ const diffs=[fa.war!==fb.war?"warhead":null, fa.e3!==fb.e3?"E3 ligand":null, fa.lnk!==fb.lnk?"linker":null].filter(Boolean);
-    if(diffs.length) regionNote=`<p class="help">Decomposition differs in: <b>${diffs.join(", ")}</b>.</p>`;
-    else regionNote=`<p class="help">Same warhead, E3 and linker fragments by decomposition — the difference is within a region (stereochemistry or a substituent).</p>`;
+  let regionNote="";
+  if(diff){ const nd=aH.length+bH.length;
+    if(nd===0){ regionNote=`<p class="help">No atoms differ — these are the same structure (or indistinguishable by connectivity).</p>`; }
+    else { const reg=regionOfDiff(a,aH,b,bH);
+      const where= reg? `The change sits in the <b>${reg}</b>${(a.userDefined&&b.userDefined)?"":` <span class="help">(region auto-assigned — set the warhead/E3 to confirm)</span>`}.` : "";
+      regionNote=`<p class="help">${nd} atom${nd===1?"":"s"} differ between the two. ${where}</p>`;
+    }
   }
   out.innerHTML=`${delta}${regionNote}
     <div class="cmp-grid">
       <div class="cmp-cell"><div class="cid">${esc(a.id)}</div>${depictAtoms(a.smiles,aH,[0.93,0.45,0.18],260,200)}<div class="help">${aH.length} atom(s) unique to ${esc(a.id)}</div></div>
       <div class="cmp-cell"><div class="cid">${esc(b.id)}</div>${depictAtoms(b.smiles,bH,[0.17,0.6,0.95],260,200)}<div class="help">${bH.length} atom(s) unique to ${esc(b.id)}</div></div>
     </div>
-    <p class="help" style="margin-top:6px">Highlighted atoms are those whose local environment (radius 3) has no counterpart in the other molecule — the structural change between the pair.</p>`;
+    <p class="help" style="margin-top:6px">Highlighted atoms have no counterpart in the maximum common substructure between the pair — the real structural change, so a group that just moves along the linker shows up on both sides (it can't map onto the other position).</p>`;
 }
 function refreshAll(){
   const valid=state.compounds.filter(c=>c.valid).length;
