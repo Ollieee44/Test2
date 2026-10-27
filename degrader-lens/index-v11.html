@@ -1787,8 +1787,26 @@ function isConfirmed(c){ if(c.structureConfirmed!=null) return !!c.structureConf
   if(c.qc && c.qc.match) return true;
   return c.source!=="claude" && !c.needsReview; }
 function regionMethod(c){ return c.userDefined?"manual":c.learned?"learned":(c.autoDecomp||c.manual)?"auto":"—"; }
-function downloadBlob(blob, filename){ const url=URL.createObjectURL(blob); const a=document.createElement("a");
-  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); }
+// Save a generated file for the viewer. In the published claude.ai artifact a plain download link
+// does nothing, so saving goes through the `downloads` capability (a viewer confirmation). On a
+// self-hosted copy (no window.claude) it falls back to a normal anchor download. SDF isn't in the
+// capability's extension allowlist, so a rejected .sdf is re-offered as .txt.
+function anchorDownload(filename, data){ const blob = data instanceof Blob ? data : new Blob([data],{type:"application/octet-stream"});
+  const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); }
+async function saveFile(filename, data){
+  if(window.claude && typeof window.claude.use==="function"){
+    let dl=null; try{ dl=await window.claude.use("downloads"); }catch(e){}
+    if(dl){ try{ await dl.save({filename, data}); toast("Saved "+filename+"."); return true; }
+      catch(err){ const code=err&&err.code;
+        if(code==="declined"||code==="rate_limited") return false;
+        if(code==="rejected_extension" && /\.sdf$/i.test(filename)){
+          try{ await dl.save({filename:filename+".txt", data}); toast("Saved as "+filename+".txt — rename to .sdf (or use CSV/Excel, which DataWarrior & Vortex read directly)."); return true; }catch(e2){} }
+        // other errors: try the anchor fallback below
+      } }
+  }
+  try{ anchorDownload(filename, data); return true; }catch(e){ toast("Couldn't save the file here."); return false; }
+}
 // one flat record per valid compound: structure + curation + properties + QC + assay data
 function exportRows(onlyConfirmed){
   const assay=assayKeys(); const out=[];
@@ -1810,12 +1828,12 @@ function onlyConfirmed(){ const el=$("#exportConfirmedOnly"); return !!(el&&el.c
 function exportXlsx(){ if(!window.XLSX){ toast("Spreadsheet library not loaded."); return; }
   const rows=exportRows(onlyConfirmed()); if(!rows.length){ toast("No structures to export."); return; }
   const ws=XLSX.utils.json_to_sheet(rows); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Degraders");
-  XLSX.writeFile(wb,"degrader_lens.xlsx"); toast(`Exported ${rows.length} compound(s) to Excel.`); }
+  const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"}); saveFile("degrader_lens.xlsx", buf); }
 function rowsToCSV(rows){ if(!rows.length) return ""; const head=[...new Set(rows.flatMap(r=>Object.keys(r)))];
   const q=s=>{ s=String(s==null?"":s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   return [head.join(","),...rows.map(r=>head.map(h=>q(r[h])).join(","))].join("\n"); }
 function exportCsvFile(){ const rows=exportRows(onlyConfirmed()); if(!rows.length){ toast("Nothing to export."); return; }
-  downloadBlob(new Blob([rowsToCSV(rows)],{type:"text/csv;charset=utf-8"}),"degrader_lens.csv"); toast(`Exported ${rows.length} compound(s) to CSV.`); }
+  saveFile("degrader_lens.csv", rowsToCSV(rows)); }
 // SDF: molfile + SD tags per compound — the native format for DataWarrior / Vortex
 function toSDF(only){ const assay=assayKeys(); const parts=[];
   state.compounds.forEach(c=>{ if(!c.valid) return; if(only && !isConfirmed(c)) return;
@@ -1836,7 +1854,7 @@ function toSDF(only){ const assay=assayKeys(); const parts=[];
   return parts.join("");
 }
 function exportSdf(){ const sdf=toSDF(onlyConfirmed()); if(!sdf){ toast("No valid structures to export."); return; }
-  downloadBlob(new Blob([sdf],{type:"chemical/x-mdl-sdfile"}),"degrader_lens.sdf"); toast("Exported SDF (molfiles + data)."); }
+  saveFile("degrader_lens.sdf", sdf); }
 
 // Scan sheet: a montage of every compound that has BOTH a structure and ≥1 biological value, for a
 // side-by-side eyeball scan. Built as one composite SVG (offline), downloadable as PNG or SVG.
@@ -1874,8 +1892,8 @@ function openScanSheet(){ const svg=buildScanSheetSVG(); if(!svg){ toast("No com
   document.body.appendChild(ov);
   ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
   ov.querySelector("#scanClose").onclick=()=>ov.remove();
-  ov.querySelector("#scanSvg").onclick=()=>downloadBlob(new Blob([svg],{type:"image/svg+xml;charset=utf-8"}),"degrader_scan_sheet.svg");
-  ov.querySelector("#scanPng").onclick=async()=>{ try{ downloadBlob(await svgToPng(svg,2),"degrader_scan_sheet.png"); }catch(e){ downloadBlob(new Blob([svg],{type:"image/svg+xml;charset=utf-8"}),"degrader_scan_sheet.svg"); toast("Saved as SVG (PNG blocked here)."); } };
+  ov.querySelector("#scanSvg").onclick=()=>saveFile("degrader_scan_sheet.svg", new Blob([svg],{type:"image/svg+xml;charset=utf-8"}));
+  ov.querySelector("#scanPng").onclick=async()=>{ try{ await saveFile("degrader_scan_sheet.png", await svgToPng(svg,2)); }catch(e){ saveFile("degrader_scan_sheet.svg", new Blob([svg],{type:"image/svg+xml;charset=utf-8"})); } };
 }
 
 // Patent by URL or ID. A bare ID is normalised to a Google Patents URL. The page then tries to
