@@ -39,14 +39,18 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
-- **`index-v12.html`** — v11 plus a **PowerPoint "structure scan" deck** built straight from a patent
-  PDF. Tick *"also spit out a PowerPoint of structure screenshots"* (or press **Build deck now**) and,
-  **right after the fast text/data pass and without any Claude/OCSR**, it screenshots the patent's own
-  structure pages into a `.pptx` — one page per slide, each captioned with the compound numbers and any
-  DC₅₀/Dmax found on it — for a quick side-by-side eyeball scan. It honours the page-range box, floods
-  only pages that actually carry drawings (or every page for a scanned PDF), caps the deck so a large
-  patent still renders quickly, and saves through the downloads capability. This is the *fast* companion
-  to the (optional, slower) Claude structure-reading, not a replacement for it.
+- **`index-v12.html`** — v11 plus a **PowerPoint "structures + data" scan deck** built straight from a
+  patent PDF. Tick *"also spit out a PowerPoint of structures + data"* (or press **Build deck now**) and
+  it screenshots the relevant pages into a `.pptx` — one page per slide, each captioned with the
+  compound numbers and any DC₅₀/Dmax — for a quick side-by-side scan. It targets the pages that show
+  **example structures whose compounds have biological data**, plus the **results-table** pages:
+  candidates are picked fast from the text pass (a page is a candidate if it's a results table with
+  several assay values, or carries drawings and names a data-bearing compound), and when Claude is
+  available it **sense-checks each candidate page image** so synthesis schemes are dropped, structure
+  pages are kept only when their compounds have activity, and a data table with no drawings is still
+  caught. Slides preserve each page's aspect ratio (no squishing). Honours the page-range box, caps the
+  deck for speed, and saves through the downloads capability (PptxGenJS). The optional, slower
+  Claude structure-reading (into live SMILES) remains the separate path.
 - **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
   **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
   DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,

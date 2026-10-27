@@ -429,10 +429,10 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             <label id="keepUnnumWrap" style="display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="keepUnnum"> keep unnumbered structures</label>
           </div>
           <div class="inline" style="margin-top:7px;gap:10px">
-            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfDeck"> 📸 also spit out a <b>PowerPoint of structure screenshots</b> (fast — no Claude)</label>
-            <button class="btn small" id="deckBtn" hidden title="build a PowerPoint from the currently loaded PDF's structure pages">Build deck now</button>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink);white-space:nowrap"><input type="checkbox" id="pdfDeck"> 📸 also spit out a <b>PowerPoint of structures + data</b></label>
+            <button class="btn small" id="deckBtn" hidden title="build a PowerPoint from the currently loaded PDF">Build deck now</button>
           </div>
-          <p class="help" id="deckNote" style="margin-top:2px">A quick visual scan: it screenshots the patent's own structure pages into a .pptx (one page per slide, captioned with the compound numbers and any DC₅₀/Dmax found on it). Runs right after the fast data pass — no structure reading needed.</p>
+          <p class="help" id="deckNote" style="margin-top:2px">A quick visual scan deck (.pptx): the pages showing example <b>structures whose compounds have biological data</b>, plus the <b>results-table</b> pages — one page per slide, captioned with the compound numbers and any DC₅₀/Dmax. Candidates come from the fast text pass; when Claude is available it <b>sense-checks each page</b> so synthesis schemes are dropped and a data table with no drawings is still caught.</p>
           <div class="datarow" style="margin-top:10px">
             <p class="help" style="margin:0">…or paste a text excerpt from a patent:</p>
             <textarea id="patentArea" spellcheck="false" placeholder="Example 14. the compound showed a DC50 of 12 nM and a Dmax of 88%. SMILES: O=C(...)...&#10;Example 15 … IC50 = 3.4 nM …"></textarea>
@@ -2244,22 +2244,14 @@ async function pageHasGraphics(pdf,n){
     return img>0 || paths>=30; // raster image, or many line segments (a drawn structure)
   }catch(e){ return false; }
 }
-/* ============== PowerPoint scan deck (fast, no OCSR) ============== */
-// Screenshot the patent's own structure pages into a .pptx for a quick visual scan — one page per
-// slide, captioned with the compound numbers (and any DC50/Dmax) the text pass found on that page.
-// No Claude/OCSR, so it runs right after the fast data pass rather than waiting on structure reading.
+/* ============== PowerPoint scan deck ============== */
+// Screenshot the patent's relevant pages into a .pptx for a quick visual scan: the pages that show
+// example STRUCTURES whose compounds have reported biological data, plus the biology/degradation
+// RESULTS TABLE pages. Candidates are picked from the text pass (fast); when Claude is available it
+// sense-checks each candidate page image so synthesis schemes are dropped, structure pages are kept
+// only when their compounds have activity data, and a data table with no drawings is still caught.
 function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
-// Choose which pages to screenshot: the user's range if given, else pages that carry drawings
-// (scanned docs: every page). Capped so a huge patent still produces a deck quickly.
-async function deckPages(pdf, range, scanned, ctl, cap){
-  cap=cap||120;
-  if(range && range.length) return range.slice(0,cap);
-  if(scanned) return Array.from({length:Math.min(pdf.numPages,cap)},(_,i)=>i+1);
-  const out=[];
-  for(let p=1;p<=pdf.numPages && out.length<cap;p++){ if(ctl&&ctl.signal.aborted) break;
-    if(await pageHasGraphics(pdf,p)) out.push(p); }
-  return out;
-}
+function imageSize(url){ return new Promise(res=>{ const im=new Image(); im.onload=()=>res({w:im.naturalWidth,h:im.naturalHeight}); im.onerror=()=>res({w:0,h:0}); im.src=url; }); }
 function deckCaption(pageText){
   const recs=extractPatentRecords(pageText||""); if(!recs.length) return "";
   return recs.slice(0,8).map(r=>{ const bits=[r.id];
@@ -2267,25 +2259,79 @@ function deckCaption(pageText){
     if(r.data.dmax_pct!=null)bits.push(`Dmax ${fmtNum(r.data.dmax_pct)}%`);
     return bits.join(" "); }).join("   ·   ");
 }
+// compound keys that have at least one biological value (not QC) — from the text/data pass
+function dataBearingKeys(){
+  return new Set(state.compounds.filter(c=>c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null)).map(c=>cmpdKey(c.id)));
+}
+// Candidate pages from text alone: a results TABLE (several assay values on the page), or a page that
+// carries drawings AND names a compound that has data. Returns [{p, isTable}].
+async function deckCandidates(pdf, pageTexts, range, scanned, ctl, cap){
+  cap=cap||150; const dataKeys=dataBearingKeys();
+  const pool = (range&&range.length) ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
+  const out=[];
+  for(const p of pool){ if(ctl&&ctl.signal.aborted) break; if(out.length>=cap) break;
+    const t=pageTexts[p-1]||"";
+    const assayHits=(normalizeAssayText(t).match(/\b(?:dc|ic|ec|gi)\s*50\b|d\s*max/gi)||[]).length;
+    const isTable = assayHits>=3;                                  // a results table (missed before)
+    const recs=extractPatentRecords(t); const namesData = recs.some(r=>dataKeys.has(cmpdKey(r.id)));
+    let gfx=false; if(!isTable) gfx = scanned ? true : await pageHasGraphics(pdf,p);
+    if(isTable || (gfx && (namesData || (scanned && !dataKeys.size)))) out.push({p, isTable});
+  }
+  return out;
+}
+// Claude sense-check of a candidate page image. Returns {keep, type, examples[], hasData}.
+async function senseCheckPage(pdf, p, ctl){
+  try{ const blob=await renderPdfPage(pdf, p, 1.6);
+    const prompt=`This is one page of a patent. Classify it for a results-focused slide deck. Reply ONLY JSON: {"type":"structures"|"data_table"|"both"|"other","example_numbers":[<the example/compound numbers shown, as strings>],"has_activity_data":true|false}. "structures" = it shows final example/claimed compound chemical structures (not synthesis schemes or intermediates). "data_table" = a table of biological/degradation results (DC50, Dmax, IC50, EC50, Ki, % degradation). "both" = both on one page. "other" = synthesis schemes, reagents, general text, assay protocols. "has_activity_data" = true if any biological activity value is visible on this page. No text outside the JSON.`;
+    const r=await state.sample.json(prompt,{images:[blob],modelTier:"quick",signal:ctl.signal});
+    if(!r||typeof r!=="object") return {keep:false};
+    const type=r.type||"other"; const ex=(Array.isArray(r.example_numbers)?r.example_numbers:[]).map(x=>cmpdKey(String(x)));
+    return {type, examples:ex, hasData:!!r.has_activity_data, raw:r};
+  }catch(e){ if(e&&e.code==="cancelled") throw e; return {keep:false}; }
+}
 async function buildScanDeck(pdf, pageTexts, opts){
   opts=opts||{};
   if(!window.PptxGenJS){ setStatus("PowerPoint library didn't load — reconnect and reload to build a deck.",false); return; }
   const ctl=opts.ctl||new AbortController();
   const range=parseRange($("#pdfRange")?$("#pdfRange").value:"", pdf.numPages);
-  const scanned=!!opts.scanned;
-  Progress.start("Building PowerPoint scan deck", "selecting structure pages"); Progress.stopBtn(true,()=>ctl.abort());
-  const pages=await deckPages(pdf, range, scanned, ctl, 120);
-  if(!pages.length){ Progress.hide(); Progress.stopBtn(false); toast("No structure pages found to screenshot."); return; }
+  const scanned=!!opts.scanned; const dataKeys=dataBearingKeys();
+  Progress.start("Building PowerPoint scan deck", "choosing pages"); Progress.stopBtn(true,()=>ctl.abort());
+  let cands=await deckCandidates(pdf, pageTexts, range, scanned, ctl, 150);
+  // Claude sense-check: keep only structure pages whose compounds have data, plus real data tables
+  const useClaude = state.sample && state.sampleImages && opts.senseCheck!==false;
+  let kept;
+  if(useClaude && cands.length){
+    kept=[]; let i=0;
+    for(const c of cands){ if(ctl.signal.aborted) break; i++;
+      Progress.set("Sense-checking pages with Claude", i/cands.length, `page ${c.p} — ${i} / ${cands.length}`);
+      let v; try{ v=await senseCheckPage(pdf, c.p, ctl); }catch(e){ if(e&&e.code==="cancelled") break; v={keep:false}; }
+      const isTable = v.type==="data_table"||v.type==="both";
+      const isStruct = v.type==="structures"||v.type==="both";
+      const structHasData = isStruct && (v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)) || (dataKeys.size===0));
+      if(isTable || structHasData) kept.push({p:c.p, isTable, examples:v.examples, hasData:v.hasData});
+    }
+    // safety net: if the sense-check kept nothing, fall back to the text candidates
+    if(!kept.length) kept=cands;
+  } else {
+    kept=cands;
+  }
+  if(!kept.length){ Progress.hide(); Progress.stopBtn(false); toast("No pages with structures + biological data found to screenshot."); return; }
+  kept.sort((a,b)=>a.p-b.p);
   const pptx=new PptxGenJS(); pptx.defineLayout({name:"DL",width:10,height:7.5}); pptx.layout="DL";
-  pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — structure scan";
-  let done=0;
-  for(const p of pages){ if(ctl.signal.aborted) break;
-    Progress.set("Building PowerPoint scan deck", done/pages.length, `page ${p} — slide ${done+1} / ${pages.length}`);
-    try{ const blob=await renderPdfPage(pdf, p, 1.6); const url=await blobToDataURL(blob);
+  pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — structure + data scan";
+  const AVW=9.5, AVH=6.55, OX=0.25, OY=0.75;   // image box below the caption
+  let done=0, nTable=0;
+  for(const k of kept){ if(ctl.signal.aborted) break; const p=k.p;
+    Progress.set("Building PowerPoint scan deck", done/kept.length, `page ${p} — slide ${done+1} / ${kept.length}`);
+    try{ const blob=await renderPdfPage(pdf, p, 1.7); const url=await blobToDataURL(blob);
+      const dim=await imageSize(url); const ar=(dim.w&&dim.h)?dim.w/dim.h:0.773;      // preserve aspect (no squish)
+      let w=AVW, h=AVW/ar; if(h>AVH){ h=AVH; w=AVH*ar; } const x=OX+(AVW-w)/2, y=OY+(AVH-h)/2;
       const slide=pptx.addSlide();
       const cap=deckCaption(pageTexts[p-1]);
-      slide.addText(`Page ${p}`+(cap?`  —  ${cap}`:""), {x:0.25,y:0.12,w:9.5,h:0.55,fontSize:11,bold:true,color:"1A222C",valign:"top",wrap:true});
-      slide.addImage({ data:url, x:0.25, y:0.75, w:9.5, h:6.55, sizing:{type:"contain",w:9.5,h:6.55} });
+      const tag = k.isTable?"Biology data table":"Structures";
+      slide.addText(`Page ${p} · ${tag}`+(cap?`  —  ${cap}`:""), {x:0.25,y:0.12,w:9.5,h:0.55,fontSize:11,bold:true,color:"1A222C",valign:"top",wrap:true});
+      slide.addImage({ data:url, x, y, w, h });
+      if(k.isTable) nTable++;
     }catch(e){}
     done++;
   }
@@ -2293,7 +2339,7 @@ async function buildScanDeck(pdf, pageTexts, opts){
   let buf; try{ buf=await pptx.write({ outputType:"arraybuffer" }); }catch(e){ Progress.hide(); Progress.stopBtn(false); setStatus("Couldn't assemble the PowerPoint: "+e.message,false); return; }
   Progress.done(); Progress.stopBtn(false);
   await saveFile("degrader_structure_scan.pptx", buf);
-  setStatus(`✓ PowerPoint scan deck: ${done} structure page(s) screenshotted into slides${range?" (your page range)":""}. ${state.sample?"Tick “also read drawn structures” to turn these into live SMILES.":""}`, true);
+  setStatus(`✓ PowerPoint scan deck: ${done} slide(s) — ${done-nTable} structure page(s) + ${nTable} data-table page(s)${useClaude?", Claude-checked":""}${range?" (your page range)":""}.`, true);
 }
 // --- OCSR accuracy: formula cross-check + confidence -> "needs review" ---
 function formulaFromSmiles(smiles){ return withMol(smiles,m=>{ try{ const ic=m.get_inchi(); const mm=ic.match(/^InChI=1S?\/([^\/]+)/); return mm?mm[1]:null; }catch(e){ return null; } }); }
