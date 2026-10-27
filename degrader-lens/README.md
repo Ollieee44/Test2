@@ -39,6 +39,14 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v12.html`** — v11 plus a **PowerPoint "structure scan" deck** built straight from a patent
+  PDF. Tick *"also spit out a PowerPoint of structure screenshots"* (or press **Build deck now**) and,
+  **right after the fast text/data pass and without any Claude/OCSR**, it screenshots the patent's own
+  structure pages into a `.pptx` — one page per slide, each captioned with the compound numbers and any
+  DC₅₀/Dmax found on it — for a quick side-by-side eyeball scan. It honours the page-range box, floods
+  only pages that actually carry drawings (or every page for a scanned PDF), caps the deck so a large
+  patent still renders quickly, and saves through the downloads capability. This is the *fast* companion
+  to the (optional, slower) Claude structure-reading, not a replacement for it.
 - **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
   **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
   DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,
