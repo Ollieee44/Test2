@@ -39,6 +39,17 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v9.html`** — v8 plus a **structure editor** and **Dmax throughout the interpretation**.
+  Each compound now has an **Edit structure** panel: edit the **SMILES directly**, or describe the
+  change in **plain language** ("add a fluorine to the warhead ring", "make the linker a 4-carbon
+  chain", "invert the hydroxyproline stereocentre", "swap the CRBN recruiter for VHL") and Claude
+  turns it into an edited SMILES, which is **validated with RDKit and shown as a before/after preview
+  with the change highlighted** before you apply it — with a one-click **revert**. The **Interpret
+  tab now reports both degrader read-outs**, not just potency: matched pairs show the **DC₅₀
+  fold-change and the Dmax change** side by side; **linker-length SAR** reports the potency optimum
+  **and** where Dmax peaks (they are often different linker lengths); "what tracks with…" shows two
+  correlation panels — **potency (DC₅₀)** and **efficacy (Dmax)**; and the compare tool spells out
+  both. Pairs can now be formed on Dmax alone when no shared potency assay is present.
 - **`index-v8.html`** — v7 plus **assigned stereochemistry** and **comparative examples**.
   Every structure's **CIP configuration is extracted** (RDKit `get_stereo_tags`): the Compound panel
   lists each stereocentre's R/S, counts **defined vs unspecified** centres (Table columns too), and
