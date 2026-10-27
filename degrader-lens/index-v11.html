@@ -117,6 +117,16 @@ header{display:flex;align-items:center;gap:12px 14px;flex-wrap:wrap;min-width:0}
 .scan-tools{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
 .scan-view{overflow:auto;padding:12px;background:var(--stage)}
 .scan-view svg{max-width:100%;height:auto;display:block}
+/* Ask / chat */
+.ask-log{display:flex;flex-direction:column;gap:10px;margin:12px 0;min-height:40px}
+.ask-msg{border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;line-height:1.55;max-width:92%;white-space:pre-wrap;word-wrap:break-word}
+.ask-msg.user{align-self:flex-end;background:var(--accent-soft);border-color:var(--accent)}
+.ask-msg.bot{align-self:flex-start;background:var(--panel-2)}
+.ask-msg.bot b{color:var(--ink)} .ask-msg .who{display:block;font:600 10.5px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.ask-suggest{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.ask-suggest button{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:4px 11px;font-size:12px;color:var(--muted);cursor:pointer}
+.ask-suggest button:hover{border-color:var(--accent);color:var(--ink)}
+.ask-input textarea{width:100%;border:1px solid var(--line);background:var(--panel-2);border-radius:8px;padding:8px 10px;font:13px var(--f-body);resize:vertical;margin-bottom:6px}
 .editsmi{flex:1;min-width:140px;border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:6px 9px;font:11.5px var(--f-mono)}
 #editInstr{font-size:12px}
 .potency{font:600 11px var(--f-mono);padding:1px 6px;border-radius:5px;background:var(--panel-2)}
@@ -317,6 +327,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <button class="tab" role="tab" data-tab="compound" aria-selected="true">Compound</button>
         <button class="tab" role="tab" data-tab="sar">SAR</button>
         <button class="tab" role="tab" data-tab="interpret">Interpret</button>
+        <button class="tab" role="tab" data-tab="ask">Ask</button>
         <button class="tab" role="tab" data-tab="table">Table</button>
         <button class="tab" role="tab" data-tab="data">Data</button>
       </div>
@@ -353,6 +364,21 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <section class="block"><h3>Matched molecular pairs</h3><div id="mmpOut"></div></section>
         <section class="block"><h3>Linker-length SAR</h3><div id="linkerSarOut"></div></section>
         <section class="block"><h3>What tracks with potency &amp; efficacy</h3><div id="driversOut"></div></section>
+      </div>
+
+      <div class="pane" id="pane-ask" role="tabpanel" hidden>
+        <h2>Ask about this set</h2>
+        <p class="sub">Questions are answered by Claude using <b>only the compounds you've loaded</b> — their data table and SMILES (regions, linker/total length, DC₅₀, Dmax, QC, properties). It reasons over your numbers, not the wider literature.</p>
+        <div id="askUnavail" class="status" hidden style="background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--warn)"></div>
+        <div id="askLog" class="ask-log"></div>
+        <div class="ask-suggest" id="askSuggest"></div>
+        <div class="ask-input">
+          <textarea id="askBox" rows="2" spellcheck="false" placeholder="e.g. Which compound has the best DC₅₀/Dmax balance? · Summarise the linker-length SAR. · Which analogs differ only in the E3?"></textarea>
+          <div class="inline" style="justify-content:flex-end;gap:6px">
+            <button class="btn small" id="askClear">Clear</button>
+            <button class="btn small primary" id="askSend">Ask</button>
+          </div>
+        </div>
       </div>
 
       <div class="pane" id="pane-table" role="tabpanel" hidden>
@@ -563,6 +589,7 @@ const state = {
   sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
   keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick", regionTemplates:{e3:[],war:[]},
   learn:{on:true,min:3,exemplars:[]},
+  chat:{history:[],busy:false},
 };
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const store={ get(k){try{return localStorage.getItem(k)}catch(e){return null}},
@@ -2601,6 +2628,72 @@ function refreshAll(){
   renderTargets(); renderChips(); renderGallery(); renderDetail(); renderChartControls(); renderChart(); renderTable();
   renderLearnBar();
   if(state.tab==="interpret") renderInterpret();
+  if(state.tab==="ask") renderAsk();
+}
+/* ===================== Ask: data-grounded Q&A over the loaded set ===================== */
+// Compact table + SMILES of every loaded compound — the ONLY context the answer is grounded in.
+function buildAskContext(){
+  const assay=assayKeys();
+  const cs=state.compounds.filter(c=>c.valid||c.dataOnly);
+  if(!cs.length) return null;
+  const head=["id","series","role","E3","SMILES","linker_len","total_len","stereo(def/undef)","QC",...assay];
+  const lines=[head.join("\t")];
+  cs.forEach(c=>{ const d=c.desc||{};
+    const row=[ c.id, (c.series||"").replace(/\t/g," "), c.dataOnly?"data-only":regionMethod(c),
+      c.e3?c.e3.ligase:(c.isGlue?"glue":(c.dataOnly?"":"—")), c.smiles||"",
+      d.linker_len??"", d.span??"", (d.stereo_centers!=null?`${(d.stereo_centers-(d.stereo_undef||0))}/${d.stereo_centers}`:""),
+      c.qc?(c.qc.match?"ok":"mismatch"):"", ...assay.map(k=>(c.data&&c.data[k]!=null)?c.data[k]:"") ];
+    lines.push(row.join("\t")); });
+  const units=assay.map(k=>{ const m=labelMeta(k); return m.unit?`${m.label} in ${m.unit}`:m.label; }).join(", ");
+  return { table:lines.join("\n"), n:cs.length, units,
+    targets: state.detectedTargets.length?state.detectedTargets.join(", "):"not stated" };
+}
+const ASK_SUGGESTIONS=["Which compound has the best DC₅₀/Dmax balance?","Summarise the linker-length SAR.","Which analogs differ only in the E3 ligand?","Which structures have unconfirmed stereochemistry or a QC mismatch?"];
+function renderAsk(){
+  const pane=$("#pane-ask"); if(!pane) return;
+  const un=$("#askUnavail");
+  if(un){ if(!state.sample){ un.hidden=false; un.innerHTML = window.claude? "Claude isn't enabled for artifacts on this account, so Ask can't run here." : "Ask runs in the published claude.ai artifact (where the page can call Claude). On a local copy it's unavailable."; }
+    else un.hidden=true; }
+  const sg=$("#askSuggest");
+  if(sg){ sg.innerHTML = state.chat.history.length? "" : ASK_SUGGESTIONS.map(s=>`<button type="button">${esc(s)}</button>`).join("");
+    sg.querySelectorAll("button").forEach(btn=>btn.onclick=()=>{ const t=$("#askBox"); if(t){ t.value=btn.textContent; askChat(); } }); }
+  const log=$("#askLog");
+  if(log){ log.innerHTML = state.chat.history.length? state.chat.history.map(m=>
+      `<div class="ask-msg ${m.role==="user"?"user":"bot"}">${m.role==="user"?"":'<span class="who">Degrader Lens</span>'}${askFmt(m.content)}</div>`).join("")
+    : `<p class="help">No questions yet. Ask anything about the ${state.compounds.filter(c=>c.valid||c.dataOnly).length||"loaded"} compounds — their potency/Dmax, decomposition, linker trends, stereochemistry or QC.</p>`;
+    log.scrollTop=log.scrollHeight; }
+  const send=$("#askSend"); if(send) send.disabled=!!state.chat.busy;
+}
+// very light markdown: **bold** and line breaks, escaped first
+function askFmt(s){ return esc(s).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>"); }
+async function askChat(){
+  const box=$("#askBox"); if(!box) return; const q=box.value.trim(); if(!q) return;
+  if(!state.sample){ toast("Ask needs the claude.ai artifact."); renderAsk(); return; }
+  if(state.chat.busy) return;
+  const ctx=buildAskContext();
+  if(!ctx){ toast("Load some compounds first."); return; }
+  box.value="";
+  state.chat.history.push({role:"user",content:q});
+  state.chat.history.push({role:"bot",content:"Thinking…"});
+  state.chat.busy=true; renderAsk();
+  const prior=state.chat.history.filter(m=>m.content!=="Thinking…").slice(0,-1)
+    .map(m=>`${m.role==="user"?"Q":"A"}: ${m.content}`).join("\n");
+  const prompt=`You are a precise medicinal-chemistry assistant embedded in "Degrader Lens", a tool for targeted protein degraders (PROTACs and molecular glues). Answer the user's question using ONLY the dataset below — ${ctx.n} compounds the user has loaded, as a tab-separated table including each compound's SMILES. Do not use outside knowledge about specific disclosed compounds; reason from these numbers. If the data doesn't contain the answer, say so plainly. Potency DC₅₀ and other IC₅₀/EC₅₀/Ki values are nM (lower = more potent); Dmax is % of target degraded (higher = better). "role" is how each compound was decomposed (manual/learned/auto). Be concise, use the compound ids, and when you rank or compare, show the key numbers. If asked about stereochemistry or QC, note that "stereo def/undef" counts defined vs unspecified centres and "QC" is a reported mass/formula consistency check (composition, not connectivity). Assay columns: ${ctx.units||"as labelled"}. Target (POI): ${ctx.targets}.
+
+DATASET (tab-separated; columns in the header row):
+${ctx.table}
+${prior?`\nConversation so far:\n${prior}\n`:""}
+User's question: ${q}
+
+Answer:`;
+  try{
+    const res=await state.sample(prompt,{ modelTier:"complex", onText:({text})=>{
+      state.chat.history[state.chat.history.length-1]={role:"bot",content:text||"Thinking…"}; renderAsk(); } });
+    const text=(res&&res.text)||state.chat.history[state.chat.history.length-1].content;
+    state.chat.history[state.chat.history.length-1]={role:"bot",content:text&&text!=="Thinking…"?text:"(no answer returned)"};
+  }catch(e){ const code=e&&e.code;
+    state.chat.history[state.chat.history.length-1]={role:"bot",content: code==="not_granted"?"Claude access wasn't granted for this page.": code==="rate_limited"?"Rate-limited — wait a moment and ask again.":"Sorry — the request failed. Try again."}; }
+  state.chat.busy=false; renderAsk();
 }
 // learning status: how many examples it holds, how many compounds it auto-completed, and controls
 function renderLearnBar(){
@@ -2632,8 +2725,8 @@ function renderTargets(){ const el=$("#poiBanner"); if(!el) return;
 function select(id){ state.selectedId=id; renderGallery(); renderDetail(); renderTable(); }
 function switchTab(t){ state.tab=t; store.set("dl.tab",t);
   $$(".tab").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===t));
-  ["compound","sar","interpret","table","data"].forEach(p=>$("#pane-"+p).hidden=(p!==t));
-  if(t==="sar") renderChart(); if(t==="table") renderTable(); if(t==="interpret") renderInterpret();
+  ["compound","sar","interpret","ask","table","data"].forEach(p=>{ const el=$("#pane-"+p); if(el) el.hidden=(p!==t); });
+  if(t==="sar") renderChart(); if(t==="table") renderTable(); if(t==="interpret") renderInterpret(); if(t==="ask") renderAsk();
 }
 function getTheme(){ const a=document.documentElement.getAttribute("data-theme"); if(a)return a;
   return matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }
@@ -2715,6 +2808,9 @@ function bindUI(){
   const exs=$("#exportSdf"); if(exs)exs.onclick=exportSdf;
   const exc=$("#exportCsv"); if(exc)exc.onclick=exportCsvFile;
   const scn=$("#scanSheet"); if(scn)scn.onclick=openScanSheet;
+  const asend=$("#askSend"); if(asend)asend.onclick=askChat;
+  const aclr=$("#askClear"); if(aclr)aclr.onclick=()=>{ state.chat.history=[]; renderAsk(); };
+  const abox=$("#askBox"); if(abox)abox.onkeydown=e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); askChat(); } };
   $("#copySmi").onclick=e=>copyText(state.compounds.filter(c=>c.valid&&(!onlyConfirmed()||isConfirmed(c))).map(c=>c.smiles+" "+c.id).join("\n"),e.currentTarget);
 }
 function doParse(replace){

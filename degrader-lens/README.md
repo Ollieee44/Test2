@@ -52,7 +52,14 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   for review (a composition check — isomers share a mass/formula, so it supports rather than proves
   the connectivity). And you can paste a **patent URL or ID** (e.g. `WO2025/072629A1`): a self-hosted
   copy fetches and parses it directly; the sandboxed claude.ai artifact (no outbound network) instead
-  turns the ID into a one-click Google Patents link to grab the PDF.
+  turns the ID into a one-click Google Patents link to grab the PDF. An **Ask tab** answers free-text
+  questions about the loaded set — *"which compound has the best DC₅₀/Dmax balance?"*, *"summarise the
+  linker-length SAR"*, *"which analogs differ only in the E3?"* — by passing the **data table plus
+  each compound's SMILES** (regions, linker/total length, potency, Dmax, stereo, QC) to Claude as the
+  sole context, so answers are about *your* compounds, not the wider literature. (Runs only where the
+  page can call Claude — the published artifact.) The RDKit WASM and PDF.js are now **published as
+  companion files** next to the page so the engine and PDF reading work in the published artifact, not
+  only on a self-hosted copy.
 - **`index-v10.html`** — v9 plus a **sharper auto-split** and **learning that auto-completes the
   decomposition from your own edits**. The automatic warhead/linker/E3 split no longer traces to the
   *farthest* ring (which swallowed a POI's own internal ethers/amides and called them linker); it
