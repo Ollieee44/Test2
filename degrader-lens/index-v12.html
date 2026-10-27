@@ -2269,12 +2269,14 @@ function dataBearingKeys(){
 // left for Claude to classify. Returns [{p, isTable}].
 async function deckCandidates(pdf, pageTexts, range, scanned, ctl, cap, broad){
   cap=cap||150; const dataKeys=dataBearingKeys();
-  const pool = (range&&range.length) ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
+  const explicitRange = !!(range&&range.length);
+  const pool = explicitRange ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
   const out=[];
   for(const p of pool){ if(ctl&&ctl.signal.aborted) break; if(out.length>=cap) break;
     const t=pageTexts[p-1]||"";
     const assayHits=(normalizeAssayText(t).match(/\b(?:dc|ic|ec|gi)\s*50\b|d\s*max/gi)||[]).length;
     const isTable = assayHits>=3;                                  // a results table (text)
+    if(explicitRange){ out.push({p, isTable}); continue; }         // you chose these pages — consider them all
     const recs=extractPatentRecords(t); const namesData = recs.some(r=>dataKeys.has(cmpdKey(r.id)));
     let gfx=false; if(!isTable) gfx = scanned ? true : await pageHasGraphics(pdf,p);
     const keep = isTable || (broad ? gfx : (gfx && (namesData || (scanned && !dataKeys.size))));
@@ -2333,10 +2335,17 @@ async function buildScanDeck(pdf, pageTexts, opts){
     const readRows=[]; verdicts.forEach(v=>{ if(v&&v.rows) readRows.push(...v.rows); });
     nRead=mergeReadData(readRows); if(nRead){ try{ refreshAll(); }catch(e){} }
     dataKeys=dataBearingKeys();
-    kept=[];
-    cands.forEach((c,i)=>{ const v=verdicts[i]||{}; const isTable=v.type==="data_table"||v.type==="both"; const isStruct=v.type==="structures"||v.type==="both";
-      const structHasData = isStruct && (v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)) || (dataKeys.size===0));
-      if(isTable || structHasData) kept.push({p:c.p, isTable, examples:v.examples}); });
+    // keep data tables + structure pages, dropping only schemes/text ("other"). When we can reliably
+    // link structure pages to data (some do), keep just those; otherwise keep ALL structure pages
+    // rather than over-dropping (compound-number matching between pages is not always reliable).
+    const tablePages=[], structPages=[];
+    cands.forEach((c,i)=>{ const v=verdicts[i]||{}; const t=v.type;
+      if(t==="data_table"||t==="both") tablePages.push({p:c.p, isTable:true, examples:v.examples});
+      else if(t==="structures") structPages.push({p:c.p, isTable:false, examples:v.examples, linked: !!(v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)))});
+      else if(!v.type) structPages.push({p:c.p, isTable:false, examples:[], linked:false}); });  // unclassified (error) → treat as a page to show
+    const linked=structPages.filter(s=>s.linked);
+    const chosenStructs = linked.length ? linked : structPages;
+    kept=[...tablePages, ...chosenStructs];
     if(!kept.length) kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));   // safety net
   } else {
     kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));
