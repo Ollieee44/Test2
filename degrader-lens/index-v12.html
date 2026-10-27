@@ -2297,10 +2297,11 @@ async function senseCheckPage(pdf, p, ctl){
 No text outside the JSON.`;
     const r=await state.sample.json(prompt,{images:[blob],modelTier:"quick",signal:ctl.signal});
     if(!r||typeof r!=="object") return {keep:false};
-    const type=r.type||"other"; const ex=(Array.isArray(r.example_numbers)?r.example_numbers:[]).map(x=>cmpdKey(String(x)));
+    const type=r.type||"other"; const exRaw=(Array.isArray(r.example_numbers)?r.example_numbers:[]).map(x=>String(x));
+    const ex=exRaw.map(x=>cmpdKey(x));
     const rows=(Array.isArray(r.rows)?r.rows:[]).map(row=>({ id:String(row.id!=null?row.id:""), data:cleanAssay(row) }))
       .filter(x=>x.id && Object.keys(x.data).length);
-    return {type, examples:ex, hasData:!!r.has_activity_data, rows};
+    return {type, examples:ex, examplesRaw:exRaw, hasData:!!r.has_activity_data, rows};
   }catch(e){ if(e&&e.code==="cancelled") throw e; return {keep:false}; }
 }
 // Merge Claude-read result rows into the compound set (fill gaps; never overwrite existing values).
@@ -2340,15 +2341,15 @@ async function buildScanDeck(pdf, pageTexts, opts){
     // rather than over-dropping (compound-number matching between pages is not always reliable).
     const tablePages=[], structPages=[];
     cands.forEach((c,i)=>{ const v=verdicts[i]||{}; const t=v.type;
-      if(t==="data_table"||t==="both") tablePages.push({p:c.p, isTable:true, examples:v.examples});
-      else if(t==="structures") structPages.push({p:c.p, isTable:false, examples:v.examples, linked: !!(v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)))});
-      else if(!v.type) structPages.push({p:c.p, isTable:false, examples:[], linked:false}); });  // unclassified (error) → treat as a page to show
+      if(t==="data_table"||t==="both") tablePages.push({p:c.p, isTable:true, examples:v.examples, examplesRaw:v.examplesRaw});
+      else if(t==="structures") structPages.push({p:c.p, isTable:false, examples:v.examples, examplesRaw:v.examplesRaw, linked: !!(v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)))});
+      else if(!v.type) structPages.push({p:c.p, isTable:false, examples:[], examplesRaw:[], linked:false}); });  // unclassified (error) → treat as a page to show
     const linked=structPages.filter(s=>s.linked);
     const chosenStructs = linked.length ? linked : structPages;
     kept=[...tablePages, ...chosenStructs];
-    if(!kept.length) kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));   // safety net
+    if(!kept.length) kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[],examplesRaw:[]}));   // safety net
   } else {
-    kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));
+    kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[],examplesRaw:[]}));
   }
   if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
   if(!kept.length){ Progress.hide(); Progress.stopBtn(false); toast("No structure/results pages found to screenshot."); return; }
@@ -2359,9 +2360,15 @@ async function buildScanDeck(pdf, pageTexts, opts){
   const cols=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))].slice(0,4);
   const colHdr=cols.map(k=>{ const m=labelMeta(k); return m.label+(m.unit?` (${m.unit})`:""); });
   const fmtCell=(c,k)=>{ const v=c.data&&c.data[k]; if(v==null) return "–"; const m=labelMeta(k); return typeof v==="number"?fmtNum(v,m.unit==="%"?0:1):String(v); };
-  const compoundsForPage=(pageText,exampleKeys)=>{ const keys=new Set((exampleKeys||[]).map(k=>cmpdKey(k)));
-    extractPatentRecords(pageText||"").forEach(r=>keys.add(cmpdKey(r.id)));
-    return state.compounds.filter(c=>(c.valid||c.dataOnly)&&keys.has(cmpdKey(c.id))&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null)); };
+  // every compound named on the page (sense-check numbers + text), mapped to its record when we have
+  // one (for data), else a stub id — so the slide ALWAYS gets a table lining ids up with the structures,
+  // with "–" where a value is unknown.
+  const byKey=new Map(state.compounds.map(c=>[cmpdKey(c.id),c]));
+  const compoundsForPage=(pageText,examplesRaw)=>{ const order=[], seen=new Set();
+    const push=id=>{ const k=cmpdKey(id); if(!k||seen.has(k))return; seen.add(k); order.push({k,id:String(id)}); };
+    (examplesRaw||[]).forEach(push);
+    extractPatentRecords(pageText||"").forEach(r=>push(r.id));
+    return order.slice(0,16).map(o=>{ const c=byKey.get(o.k); return c || {id:o.id, data:{}, desc:{}}; }); };
   const dataTable=(cs,max)=>{ cs=cs.slice(0,max||16); if(!cs.length) return null;
     const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),{text:"Linker",options:{bold:true,fill:"EEF0F4"}}];
     const rows=[head];
@@ -2386,7 +2393,7 @@ async function buildScanDeck(pdf, pageTexts, opts){
     try{ const blob=await renderPdfPage(pdf, p, 1.7); const url=await blobToDataURL(blob);
       const dim=await imageSize(url); const ar=(dim.w&&dim.h)?dim.w/dim.h:0.773;
       const slide=pptx.addSlide();
-      const cs=compoundsForPage(pageTexts[p-1], k.examples);
+      const cs=compoundsForPage(pageTexts[p-1], k.examplesRaw);
       const rows=dataTable(cs,16);
       const tag=k.isTable?"Biology data table":"Structures";
       slide.addText(`Page ${p} · ${tag}`,{x:0.25,y:0.12,w:9.5,h:0.5,fontSize:13,bold:true,color:"1A222C"});

@@ -50,7 +50,9 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   pages are kept only when their compounds have activity, and a data table with no drawings is still
   caught. **Every slide carries the biological data alongside the structures** — a compact table of the
   compounds on that page (DC₅₀, Dmax, other assays, linker length) so a chemist can go
-  compound-by-compound — and the deck opens with a **summary slide** of the whole set. The sense-check
+  compound-by-compound — the table lists **every compound named on the page** lined up with the
+  structures, filled with data where known and "–" where not, so a table appears on each slide even
+  before any data is read — and the deck opens with a **summary slide** of the whole set. The sense-check
   pass **also reads the activity values straight off the results-table pages** and merges them, so the
   slide tables fill in even when the data is an image and you only ticked the deck box (no separate
   full structure-read needed); it also surfaces that data in the app's Table. Slides preserve each page's aspect ratio (no squishing). The Claude sense-check runs its
