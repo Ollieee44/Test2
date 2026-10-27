@@ -2295,42 +2295,78 @@ async function buildScanDeck(pdf, pageTexts, opts){
   const ctl=opts.ctl||new AbortController();
   const range=parseRange($("#pdfRange")?$("#pdfRange").value:"", pdf.numPages);
   const scanned=!!opts.scanned; const dataKeys=dataBearingKeys();
+  // run up to `lim` async tasks at once (cuts the sense-check from minutes to ~a third)
+  const mapPool=async(items,lim,fn,onDone)=>{ const out=new Array(items.length); let idx=0,done=0;
+    const worker=async()=>{ while(idx<items.length){ const i=idx++; try{ out[i]=await fn(items[i],i); }catch(e){ out[i]=undefined; if(e&&e.code==="cancelled") return; } done++; if(onDone)onDone(done); } };
+    await Promise.all(Array.from({length:Math.min(lim,items.length)},worker)); return out; };
+  // which assay columns to show (DC50/Dmax first), capped to fit the slide
+  const assays=assayKeys(); const pri=["dc50_nm","dmax_pct","target_ic50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","gi50_nm"];
+  const cols=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))].slice(0,4);
+  const colHdr=cols.map(k=>{ const m=labelMeta(k); return m.label+(m.unit?` (${m.unit})`:""); });
+  const fmtCell=(c,k)=>{ const v=c.data&&c.data[k]; if(v==null) return "–"; const m=labelMeta(k); return typeof v==="number"?fmtNum(v,m.unit==="%"?0:1):String(v); };
+  // compounds to tabulate for a page: those named on it (sense-check examples + text) that have data
+  const compoundsForPage=(pageText,exampleKeys)=>{ const keys=new Set((exampleKeys||[]).map(k=>cmpdKey(k)));
+    extractPatentRecords(pageText||"").forEach(r=>keys.add(cmpdKey(r.id)));
+    return state.compounds.filter(c=>(c.valid||c.dataOnly)&&keys.has(cmpdKey(c.id))&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null)); };
+  // build a PptxGenJS table (rows of styled cells) from a list of compounds
+  const dataTable=(cs,max)=>{ cs=cs.slice(0,max||16); if(!cs.length) return null;
+    const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),{text:"Linker",options:{bold:true,fill:"EEF0F4"}}];
+    const rows=[head];
+    cs.forEach(c=>rows.push([ {text:String(c.id),options:{bold:true}}, ...cols.map(k=>fmtCell(c,k)), (c.desc&&c.desc.linker_len!=null?String(c.desc.linker_len):"–") ]));
+    return rows; };
+  const tblW=4.55, tblColW=[0.95, ...cols.map(()=> (tblW-0.95-0.6)/Math.max(1,cols.length)), 0.6];
+
   Progress.start("Building PowerPoint scan deck", "choosing pages"); Progress.stopBtn(true,()=>ctl.abort());
   let cands=await deckCandidates(pdf, pageTexts, range, scanned, ctl, 150);
-  // Claude sense-check: keep only structure pages whose compounds have data, plus real data tables
+  // Claude sense-check (in parallel): keep structure pages whose compounds have data, plus real data tables
   const useClaude = state.sample && state.sampleImages && opts.senseCheck!==false;
   let kept;
   if(useClaude && cands.length){
-    kept=[]; let i=0;
-    for(const c of cands){ if(ctl.signal.aborted) break; i++;
-      Progress.set("Sense-checking pages with Claude", i/cands.length, `page ${c.p} — ${i} / ${cands.length}`);
-      let v; try{ v=await senseCheckPage(pdf, c.p, ctl); }catch(e){ if(e&&e.code==="cancelled") break; v={keep:false}; }
-      const isTable = v.type==="data_table"||v.type==="both";
-      const isStruct = v.type==="structures"||v.type==="both";
+    Progress.set("Sense-checking pages with Claude", 0, `0 / ${cands.length} pages`);
+    const verdicts=await mapPool(cands, 4, c=>senseCheckPage(pdf, c.p, ctl),
+      d=>Progress.set("Sense-checking pages with Claude", d/cands.length, `${d} / ${cands.length} pages`));
+    kept=[];
+    cands.forEach((c,i)=>{ const v=verdicts[i]||{}; const isTable=v.type==="data_table"||v.type==="both"; const isStruct=v.type==="structures"||v.type==="both";
       const structHasData = isStruct && (v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)) || (dataKeys.size===0));
-      if(isTable || structHasData) kept.push({p:c.p, isTable, examples:v.examples, hasData:v.hasData});
-    }
-    // safety net: if the sense-check kept nothing, fall back to the text candidates
-    if(!kept.length) kept=cands;
+      if(isTable || structHasData) kept.push({p:c.p, isTable, examples:v.examples}); });
+    if(!kept.length) kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));   // safety net
   } else {
-    kept=cands;
+    kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[]}));
   }
+  if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
   if(!kept.length){ Progress.hide(); Progress.stopBtn(false); toast("No pages with structures + biological data found to screenshot."); return; }
   kept.sort((a,b)=>a.p-b.p);
+
   const pptx=new PptxGenJS(); pptx.defineLayout({name:"DL",width:10,height:7.5}); pptx.layout="DL";
   pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — structure + data scan";
-  const AVW=9.5, AVH=6.55, OX=0.25, OY=0.75;   // image box below the caption
-  let done=0, nTable=0;
+  // summary slide first: the whole data table for navigation
+  const allData=state.compounds.filter(c=>(c.valid||c.dataOnly)&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null));
+  if(allData.length){ const s0=pptx.addSlide();
+    s0.addText(`${esc(state.pdfName||"Patent")} — ${allData.length} compound(s) with data`,{x:0.3,y:0.2,w:9.4,h:0.5,fontSize:16,bold:true,color:"1A222C"});
+    const rows=dataTable(allData,24);
+    if(rows) s0.addTable(rows,{x:0.3,y:0.85,w:9.4,colW:[1.1,...cols.map(()=> (9.4-1.1-1.0)/Math.max(1,cols.length)),1.0],fontSize:10,border:{pt:0.5,color:"DDDDDD"},valign:"middle"});
+    if(allData.length>24) s0.addText(`…and ${allData.length-24} more (see the slides).`,{x:0.3,y:7.0,w:9,h:0.3,fontSize:9,italic:true,color:"777777"});
+  }
+  const IMW=4.55, IMH=6.4, IX=0.25, IY=0.8;   // image box (left) when a table sits on the right
+  let done=0, nTable=0, nTabled=0;
   for(const k of kept){ if(ctl.signal.aborted) break; const p=k.p;
     Progress.set("Building PowerPoint scan deck", done/kept.length, `page ${p} — slide ${done+1} / ${kept.length}`);
     try{ const blob=await renderPdfPage(pdf, p, 1.7); const url=await blobToDataURL(blob);
-      const dim=await imageSize(url); const ar=(dim.w&&dim.h)?dim.w/dim.h:0.773;      // preserve aspect (no squish)
-      let w=AVW, h=AVW/ar; if(h>AVH){ h=AVH; w=AVH*ar; } const x=OX+(AVW-w)/2, y=OY+(AVH-h)/2;
+      const dim=await imageSize(url); const ar=(dim.w&&dim.h)?dim.w/dim.h:0.773;
       const slide=pptx.addSlide();
-      const cap=deckCaption(pageTexts[p-1]);
-      const tag = k.isTable?"Biology data table":"Structures";
-      slide.addText(`Page ${p} · ${tag}`+(cap?`  —  ${cap}`:""), {x:0.25,y:0.12,w:9.5,h:0.55,fontSize:11,bold:true,color:"1A222C",valign:"top",wrap:true});
-      slide.addImage({ data:url, x, y, w, h });
+      const cs=compoundsForPage(pageTexts[p-1], k.examples);
+      const rows=dataTable(cs,16);
+      const tag=k.isTable?"Biology data table":"Structures";
+      slide.addText(`Page ${p} · ${tag}`,{x:0.25,y:0.12,w:9.5,h:0.5,fontSize:13,bold:true,color:"1A222C"});
+      if(rows){ // structures (left) + their data table (right)
+        let w=IMW, h=IMW/ar; if(h>IMH){ h=IMH; w=IMH*ar; } const x=IX+(IMW-w)/2, y=IY+(IMH-h)/2;
+        slide.addImage({ data:url, x, y, w, h });
+        slide.addTable(rows,{x:5.1, y:0.8, w:tblW, colW:tblColW, fontSize:9, border:{pt:0.5,color:"DDDDDD"}, valign:"middle", autoPage:false});
+        nTabled++;
+      } else { // no per-page data found — show the page full width
+        const AVW=9.5,AVH=6.55; let w=AVW,h=AVW/ar; if(h>AVH){h=AVH;w=AVH*ar;} const x=0.25+(AVW-w)/2,y=0.8+(AVH-h)/2;
+        slide.addImage({ data:url, x, y, w, h });
+      }
       if(k.isTable) nTable++;
     }catch(e){}
     done++;
@@ -2339,7 +2375,7 @@ async function buildScanDeck(pdf, pageTexts, opts){
   let buf; try{ buf=await pptx.write({ outputType:"arraybuffer" }); }catch(e){ Progress.hide(); Progress.stopBtn(false); setStatus("Couldn't assemble the PowerPoint: "+e.message,false); return; }
   Progress.done(); Progress.stopBtn(false);
   await saveFile("degrader_structure_scan.pptx", buf);
-  setStatus(`✓ PowerPoint scan deck: ${done} slide(s) — ${done-nTable} structure page(s) + ${nTable} data-table page(s)${useClaude?", Claude-checked":""}${range?" (your page range)":""}.`, true);
+  setStatus(`✓ PowerPoint scan deck: ${allData.length?"summary + ":""}${done} page slide(s) — ${done-nTable} structure page(s) + ${nTable} data-table page(s), ${nTabled} with a data table alongside${useClaude?", Claude-checked":""}.`, true);
 }
 // --- OCSR accuracy: formula cross-check + confidence -> "needs review" ---
 function formulaFromSmiles(smiles){ return withMol(smiles,m=>{ try{ const ic=m.get_inchi(); const mm=ic.match(/^InChI=1S?\/([^\/]+)/); return mm?mm[1]:null; }catch(e){ return null; } }); }

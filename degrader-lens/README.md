@@ -48,9 +48,13 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   several assay values, or carries drawings and names a data-bearing compound), and when Claude is
   available it **sense-checks each candidate page image** so synthesis schemes are dropped, structure
   pages are kept only when their compounds have activity, and a data table with no drawings is still
-  caught. Slides preserve each page's aspect ratio (no squishing). Honours the page-range box, caps the
-  deck for speed, and saves through the downloads capability (PptxGenJS). The optional, slower
-  Claude structure-reading (into live SMILES) remains the separate path.
+  caught. **Every slide carries the biological data alongside the structures** — a compact table of the
+  compounds on that page (DC₅₀, Dmax, other assays, linker length), pulled from the already-extracted
+  data so a chemist can go compound-by-compound — and the deck opens with a **summary slide** of the
+  whole set. Slides preserve each page's aspect ratio (no squishing). The Claude sense-check runs its
+  pages **in parallel** (much faster than one-by-one). Honours the page-range box, caps the deck for
+  speed, and saves through the downloads capability (PptxGenJS). The optional, slower Claude
+  structure-reading (into live SMILES) remains the separate path.
 - **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
   **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
   DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,
