@@ -39,6 +39,22 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v10.html`** — v9 plus a **sharper auto-split** and **learning that auto-completes the
+  decomposition from your own edits**. The automatic warhead/linker/E3 split no longer traces to the
+  *farthest* ring (which swallowed a POI's own internal ethers/amides and called them linker); it
+  now takes the E3 ligand's ring system as one end, the largest ring-bearing fragment beyond it as
+  the warhead, and the **linker is only the acyclic chain up to the warhead's first ring** — so a
+  multi-ring POI keeps its internal connectors. On top of that, **every compound you decompose by
+  hand becomes a labelled example**. Its E3 and warhead fragments go into a match library and its
+  full atom→region map is kept, so once you have **three hand-labelled compounds the tool
+  auto-completes the rest**: a congener is split by fragment match, and a not-quite-identical analog
+  is labelled by **MCS atom-mapping transfer** from the most similar example you labelled. Your own
+  labels are never overwritten; auto-completed ones are badged **"learned"** (vs **"manual"**) with a
+  one-click *Looks right ✓* to confirm (or just re-assign to correct — which teaches it). The library
+  **persists in your browser and keeps improving across uploads**, with a status bar showing how many
+  examples it holds and how many it filled in, plus an on/off toggle and a clear button. This is
+  instance-based learning (no server, no trained model) — but for a congeneric series it means
+  labelling a handful and getting the whole set.
 - **`index-v9.html`** — v8 plus a **structure editor** and **Dmax throughout the interpretation**.
   Each compound now has an **Edit structure** panel: edit the **SMILES directly**, or describe the
   change in **plain language** ("add a fluorine to the warhead ring", "make the linker a 4-carbon
