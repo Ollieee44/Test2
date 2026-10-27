@@ -49,9 +49,11 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   available it **sense-checks each candidate page image** so synthesis schemes are dropped, structure
   pages are kept only when their compounds have activity, and a data table with no drawings is still
   caught. **Every slide carries the biological data alongside the structures** — a compact table of the
-  compounds on that page (DC₅₀, Dmax, other assays, linker length), pulled from the already-extracted
-  data so a chemist can go compound-by-compound — and the deck opens with a **summary slide** of the
-  whole set. Slides preserve each page's aspect ratio (no squishing). The Claude sense-check runs its
+  compounds on that page (DC₅₀, Dmax, other assays, linker length) so a chemist can go
+  compound-by-compound — and the deck opens with a **summary slide** of the whole set. The sense-check
+  pass **also reads the activity values straight off the results-table pages** and merges them, so the
+  slide tables fill in even when the data is an image and you only ticked the deck box (no separate
+  full structure-read needed); it also surfaces that data in the app's Table. Slides preserve each page's aspect ratio (no squishing). The Claude sense-check runs its
   pages **in parallel** (much faster than one-by-one). Honours the page-range box, caps the deck for
   speed, and saves through the downloads capability (PptxGenJS). The optional, slower Claude
   structure-reading (into live SMILES) remains the separate path.
