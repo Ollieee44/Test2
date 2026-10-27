@@ -922,20 +922,18 @@ function regionsFromAnchors(g,e3a,wara){
   if(wara.length){ const dc=autoDecompose(g,wara); return dc?{e3:dc.warhead,lnk:dc.linker,war:dc.e3}:null; }
   return null;
 }
-// Push the saved E3/warhead definitions to every compound and split each one. The E3 is
-// matched by the captured fragment OR the anchor library; the warhead by the captured
-// fragment. Returns {matched, skipped} so the UI can report how far it reached.
+// Push your hand-labelled regions to every other compound. Uses the SAME inference as the learning
+// auto-complete: copy the labels of the most similar compound you decomposed through the MCS mapping
+// (ring-containing linkers transfer intact), and only fall back to fragment-match + flood split when
+// no similar exemplar exists. Returns {matched, skipped, kept} for the UI.
 function applyTemplatesToAll(){
-  const t=state.regionTemplates||{}; const e3t=t.e3||[], wart=t.war||[];
-  if(!e3t.length && !wart.length) return {matched:0,skipped:0,kept:0};
+  const t=state.regionTemplates||{}; const haveTpl=(t.e3||[]).length||(t.war||[]).length;
+  if(!haveTpl && !(state.learn.exemplars||[]).length) return {matched:0,skipped:0,kept:0};
   let matched=0, skipped=0, kept=0;
   state.compounds.forEach(c=>{ if(!c.valid) return;
     if(c.userDefined){ kept++; return; }               // leave hand-defined compounds exactly as they are
-    const mr=withMol(c.smiles,m=>{ const g=parseGraph(m.get_molblock());
-      const e3a = matchE3On(m, e3t);                  // any captured E3 variant, else anchor library
-      const wara = matchAny(m, wart);                 // any captured POI/warhead variant
-      return (e3a.length||wara.length)? regionsFromAnchors(g,e3a,wara) : null; });
-    if(mr){ c.manualRegions=mr; applyManualRegions(c); matched++; } else skipped++; });
+    const mr=inferRegions(c);
+    if(mr){ c.manualRegions={e3:mr.e3,war:mr.war}; applyManualRegions(c); c.learned=true; c.learnedVia=mr.via||null; matched++; } else skipped++; });
   state.showRegions=true; refreshAll(); return {matched,skipped,kept};
 }
 // Rebuild regionMap + linker length from the user's warhead/E3 choice. The warhead and E3 atoms
@@ -996,33 +994,38 @@ function rebuildLearning(){
   state.learn.exemplars=[...bySmiles.values()];
   rebuildTemplatesFromExemplars(); persistLearning();
 }
-// MCS label-transfer: map a compound onto its most similar exemplar and copy each mapped atom's
-// region, giving E3 and warhead seed cores (splitByBridge then floods the rest cleanly).
-function mcsTransferCores(c, g){
+// MCS label-transfer — the faithful path. Map a compound onto the most similar compound you
+// decomposed by hand and COPY that compound's region of every mapped atom, verbatim. This keeps a
+// ring-containing linker intact (every linker ring the exemplar marks "lnk" transfers as linker)
+// instead of re-deriving the split and losing it. The few atoms that don't map (an added/removed
+// glycol, a swapped group) inherit their nearest mapped neighbour's region by flood propagation.
+function transferRegions(c, g){
   const exs=state.learn.exemplars; if(!exs||!exs.length) return null;
-  let best=null, bestScore=0;
-  for(const ex of exs){ if(ex.smiles===c.smiles) continue; const gx=molGraphStereo(ex.smiles); if(!gx) continue;
+  let best=null, bestScore=0; const lim=Math.min(exs.length,12);
+  for(let i=0;i<lim;i++){ const ex=exs[i]; if(ex.smiles===c.smiles) continue; const gx=molGraphStereo(ex.smiles); if(!gx) continue;
     const M=mcsMap(g,gx); const score=M.size/Math.max(1,Math.min(g.na,gx.na));
     if(score>bestScore){ bestScore=score; best={ex,M}; } }
-  if(!best || bestScore<0.55) return null;                 // too dissimilar to transfer with confidence
-  const e3=[],war=[]; for(const [a,bx] of best.M){ const role=best.ex.roles[bx]; if(role==="e3")e3.push(a); else if(role==="war")war.push(a); }
-  if(!e3.length||!war.length) return null;
-  return {e3,war,via:best.ex.id,score:bestScore};
+  if(!best || bestScore<0.5) return null;                  // no sufficiently similar exemplar to copy from
+  const reg=new Array(g.na).fill(null);
+  for(const [a,bx] of best.M){ const r=best.ex.roles[bx]; if(r) reg[a]=r; }   // copy each mapped atom's region
+  // propagate to unmapped atoms: each takes its nearest labelled neighbour's region (BFS)
+  const q=[]; for(let a=0;a<g.na;a++) if(reg[a]!=null) q.push(a);
+  for(let h=0;h<q.length;h++){ const u=q[h]; for(const v of g.adj[u]) if(reg[v]==null){ reg[v]=reg[u]; q.push(v); } }
+  const e3=[],war=[],lnk=[]; for(let a=0;a<g.na;a++){ const r=reg[a]||"lnk"; (r==="war"?war:r==="e3"?e3:lnk).push(a); }
+  if(!e3.length||!war.length) return null;                 // need both ligands for a degrader split
+  return {e3,war,lnk,via:best.ex.id,score:bestScore};
 }
-// infer a compound's regions from the library: fast fragment match first, MCS transfer to fill a
-// missing core, then the flood split. Returns {e3,war,lnk,via} or null if it can't be placed.
+// Infer a compound's regions from the library. PRIMARY: copy the labels of the most similar
+// hand-decomposed compound through the MCS mapping (ring-aware, faithful). FALLBACK (no similar
+// exemplar): fragment-match the E3/warhead and flood-split — the old behaviour, acyclic linker only.
 function inferRegions(c){
+  const t=withMol(c.smiles,m=>{ const g=parseGraph(m.get_molblock()); return transferRegions(c,g); });
+  if(t) return {e3:t.e3, war:t.war, lnk:t.lnk, via:t.via};
   return withMol(c.smiles,m=>{ const g=parseGraph(m.get_molblock());
-    let e3a=matchE3On(m, state.regionTemplates.e3);
-    let wara=matchAny(m, state.regionTemplates.war);
-    let via=null;
-    if(!(e3a.length&&wara.length)){ const t=mcsTransferCores(c,g);
-      if(t){ if(!e3a.length)e3a=t.e3; if(!wara.length)wara=t.war; via=t.via; } }
-    let r=null;
-    if(e3a.length&&wara.length) r=splitByBridge(g,e3a,wara);
-    else if(e3a.length||wara.length) r=regionsFromAnchors(g,e3a,wara);
-    if(r) r.via=via;
-    return r;
+    const e3a=matchE3On(m, state.regionTemplates.e3), wara=matchAny(m, state.regionTemplates.war);
+    if(e3a.length && wara.length) return splitByBridge(g,e3a,wara);
+    if(e3a.length || wara.length) return regionsFromAnchors(g,e3a,wara);
+    return null;
   }) || null;
 }
 // auto-complete every compound you have NOT hand-labelled, once the library has ≥min exemplars.
