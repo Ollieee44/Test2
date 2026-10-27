@@ -39,6 +39,20 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
+- **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
+  **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
+  DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,
+  total length, stereocentres, calculated properties, QC status and all assay data — with a
+  per-compound **"structure confirmed"** flag and an *export-only-confirmed* option. A **scan sheet**
+  builds a montage of every compound that has both a structure and biological data (structure · id ·
+  DC₅₀/Dmax/linker) for a side-by-side eyeball scan, downloadable as **PNG or SVG**. **QC validation**
+  parses reported characterisation — molecular **formula, MW, HRMS/ESI m/z [M+H]⁺, HPLC purity** —
+  from the text/tables (and from Claude-read pages) and checks it against the values computed from the
+  SMILES: a match marks the structure **QC-consistent** (and can auto-confirm it), a mismatch flags it
+  for review (a composition check — isomers share a mass/formula, so it supports rather than proves
+  the connectivity). And you can paste a **patent URL or ID** (e.g. `WO2025/072629A1`): a self-hosted
+  copy fetches and parses it directly; the sandboxed claude.ai artifact (no outbound network) instead
+  turns the ID into a one-click Google Patents link to grab the PDF.
 - **`index-v10.html`** — v9 plus a **sharper auto-split** and **learning that auto-completes the
   decomposition from your own edits**. The automatic warhead/linker/E3 split no longer traces to the
   *farthest* ring (which swallowed a POI's own internal ethers/amides and called them linker); it
