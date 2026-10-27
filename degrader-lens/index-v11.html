@@ -2741,8 +2741,8 @@ function boot(){
 // 404s there; the WASM must come from the same CDN as the RDKit JS. Try the CDN first (works in the
 // artifact and online), then fall back to a local copy (an offline self-hosted deployment).
 const RDKIT_WASM_URLS=[
-  "https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.wasm",
-  "./RDKit_minimal.wasm"
+  "./RDKit_minimal.wasm",   // served as a companion file next to the page (artifact origin) and self-hosted
+  "https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.wasm"  // online fallback
 ];
 async function loadRDKit(){
   let lastErr;
