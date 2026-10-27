@@ -2737,10 +2737,25 @@ function boot(){
   $("#boot").hidden=true; $("#app").hidden=false;
   resolveClaude();
 }
+// Load the RDKit WASM. The published artifact serves only this HTML, so a local "./RDKit_minimal.wasm"
+// 404s there; the WASM must come from the same CDN as the RDKit JS. Try the CDN first (works in the
+// artifact and online), then fall back to a local copy (an offline self-hosted deployment).
+const RDKIT_WASM_URLS=[
+  "https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/RDKit_minimal.wasm",
+  "./RDKit_minimal.wasm"
+];
+async function loadRDKit(){
+  let lastErr;
+  for(const u of RDKIT_WASM_URLS){
+    try{ return await initRDKitModule({ locateFile:()=>u }); }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr || new Error("no wasm source");
+}
 window.addEventListener("DOMContentLoaded",()=>{
   if(typeof initRDKitModule!=="function"){ $("#bootmsg").textContent="Could not load the chemistry engine (offline?). Reconnect and reload."; return; }
-  initRDKitModule({ locateFile:()=>"./RDKit_minimal.wasm" })
+  loadRDKit()
     .then(rk=>{ state.rdkit=rk; try{ boot(); }catch(e){ $("#bootmsg").textContent="Startup error: "+e.message; console.error(e); } })
-    .catch(e=>{ $("#bootmsg").textContent="Chemistry engine failed to initialise: "+e.message; console.error(e); });
+    .catch(e=>{ $("#bootmsg").textContent="Chemistry engine failed to initialise: "+(e&&e.message||e)+". Reload to retry."; console.error(e); });
 });
 </script>

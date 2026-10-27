@@ -2231,7 +2231,7 @@ function boot(){
 }
 window.addEventListener("DOMContentLoaded",()=>{
   if(typeof initRDKitModule!=="function"){ $("#bootmsg").textContent="Could not load the chemistry engine (offline?). Reconnect and reload."; return; }
-  initRDKitModule({ locateFile:()=>"./RDKit_minimal.wasm" })
+  initRDKitModule({ locateFile:(f)=>"https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.4-1.0.0/dist/"+f })
     .then(rk=>{ state.rdkit=rk; try{ boot(); }catch(e){ $("#bootmsg").textContent="Startup error: "+e.message; console.error(e); } })
     .catch(e=>{ $("#bootmsg").textContent="Chemistry engine failed to initialise: "+e.message; console.error(e); });
 });
