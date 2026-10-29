@@ -2267,15 +2267,31 @@ function dataBearingKeys(){
 // page naming a data-bearing compound. BROAD mode (when Claude will sense-check): also include any
 // page carrying drawings/an image — so an image-only results table or a structure page is caught and
 // left for Claude to classify. Returns [{p, isTable}].
+// Does a page's text look like a biological RESULTS TABLE? Lenient on purpose: a typical degradation
+// table names the assay only in its header (one "DC50", one "Dmax"), so the old "≥3 assay hits" rule
+// missed the very page that holds the data. Catch header-style tables, continuation pages, and
+// number-dense compound tables too — a false positive only costs one Claude page read, a miss loses data.
+function looksLikeResultsTable(t, norm){
+  norm = norm || normalizeAssayText(t);
+  const assayHits=(norm.match(/\b(?:dc|ic|ec|gi)\s*50\b|d\s*max/gi)||[]).length;
+  if(assayHits>=3) return true;                                    // obvious table
+  const assayKw=/\b(?:dc50|ic50|ec50|gi50|d\s*max|degradation|%\s*deg|pdc50|potency|binding|k[di]\b|nm\b|µm|μm)\b/i.test(norm);
+  const nums=(String(t).match(/\d{1,4}(?:[.,]\d+)?/g)||[]).length; // numeric density
+  const cmpdMentions=(norm.match(new RegExp(CMPD_LABEL,"gi"))||[]).length;
+  // header-style / loosely-worded table: an assay keyword plus a column of numbers
+  if(assayKw && nums>=8) return true;
+  // a dense numeric table that lists several compound numbers (continuation page, data without the header word)
+  if(cmpdMentions>=4 && nums>=12) return true;
+  return false;
+}
 async function deckCandidates(pdf, pageTexts, range, scanned, ctl, cap, broad){
   cap=cap||150; const dataKeys=dataBearingKeys();
   const explicitRange = !!(range&&range.length);
   const pool = explicitRange ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
   const out=[];
   for(const p of pool){ if(ctl&&ctl.signal.aborted) break; if(out.length>=cap) break;
-    const t=pageTexts[p-1]||"";
-    const assayHits=(normalizeAssayText(t).match(/\b(?:dc|ic|ec|gi)\s*50\b|d\s*max/gi)||[]).length;
-    const isTable = assayHits>=3;                                  // a results table (text)
+    const t=pageTexts[p-1]||""; const norm=normalizeAssayText(t);
+    const isTable = looksLikeResultsTable(t, norm);                // a results table (text) — lenient
     if(explicitRange){ out.push({p, isTable}); continue; }         // you chose these pages — consider them all
     const recs=extractPatentRecords(t); const namesData = recs.some(r=>dataKeys.has(cmpdKey(r.id)));
     let gfx=false; if(!isTable) gfx = scanned ? true : await pageHasGraphics(pdf,p);
@@ -2330,17 +2346,46 @@ async function buildScanDeck(pdf, pageTexts, opts){
   Progress.start("Building PowerPoint scan deck", "choosing pages"); Progress.stopBtn(true,()=>ctl.abort());
   const useClaude = state.sample && state.sampleImages && opts.senseCheck!==false;
   let cands=await deckCandidates(pdf, pageTexts, range, scanned, ctl, 150, useClaude);
-  let nRead=0, verdicts=[];
+  let nRead=0, verdicts=[]; const readPages=new Set();
   if(useClaude && cands.length){
     Progress.set("Reading pages with Claude (structures + results tables)", 0, `0 / ${cands.length} pages`);
     verdicts=await mapPool(cands, 4, c=>senseCheckPage(pdf, c.p, ctl),
       d=>Progress.set("Reading pages with Claude (structures + results tables)", d/cands.length, `${d} / ${cands.length} pages`));
+    cands.forEach(c=>readPages.add(c.p));
     // merge activity values read off results-table pages (so data exists even for image-only tables)
     const readRows=[]; verdicts.forEach(v=>{ if(v&&v.rows) readRows.push(...v.rows); });
     nRead=mergeReadData(readRows); if(nRead){ try{ refreshAll(); }catch(e){} }
   }
   if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
   dataKeys=dataBearingKeys();
+
+  // Fallback: Claude located structures but read no activity values (the results table wasn't picked as a
+  // candidate — e.g. a plain text table on a page with no drawings the heuristics missed). Read the most
+  // number-dense pages we haven't looked at yet, in case the data is there.
+  if(useClaude && !dataKeys.size && !range){
+    const struckPages = verdicts.some(v=>v&&v.boxes&&v.boxes.length);
+    if(struckPages || !cands.length){
+      const scored=[];
+      for(let p=1;p<=pdf.numPages;p++){ if(readPages.has(p)) continue;
+        const t=pageTexts[p-1]||""; const norm=normalizeAssayText(t);
+        const assayKw=/\b(?:dc50|ic50|ec50|gi50|d\s*max|degradation|potency|binding|nm\b|µm|μm)\b/i.test(norm);
+        const nums=(t.match(/\d{1,4}(?:[.,]\d+)?/g)||[]).length;
+        const cmpd=(norm.match(new RegExp(CMPD_LABEL,"gi"))||[]).length;
+        const score=(assayKw?50:0)+nums+cmpd*5;
+        if(nums>=6) scored.push({p,score}); }
+      scored.sort((a,b)=>b.score-a.score);
+      const extra=scored.slice(0,15).map(s=>s.p);
+      if(extra.length){
+        Progress.set("Looking for the results table", 0, `0 / ${extra.length} pages`);
+        const vv=await mapPool(extra, 4, p=>senseCheckPage(pdf, p, ctl),
+          d=>Progress.set("Looking for the results table", d/extra.length, `${d} / ${extra.length} pages`));
+        vv.forEach(v=>{ if(v){ verdicts.push(v); if(v.page)readPages.add(v.page); } });
+        const rr=[]; vv.forEach(v=>{ if(v&&v.rows) rr.push(...v.rows); });
+        const n2=mergeReadData(rr); if(n2){ nRead+=n2; try{ refreshAll(); }catch(e){} dataKeys=dataBearingKeys(); }
+      }
+    }
+    if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
+  }
 
   // assay columns (DC50/Dmax first) + value formatter
   const assays=assayKeys(); const pri=["dc50_nm","dmax_pct","target_ic50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","gi50_nm"];
@@ -2353,7 +2398,18 @@ async function buildScanDeck(pdf, pageTexts, opts){
   const present=state.compounds.filter(c=>(c.valid||c.dataOnly)&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null));
   present.sort((a,b)=> numId(a.id)-numId(b.id) || String(a.id).localeCompare(String(b.id)));
   if(!present.length){ Progress.hide(); Progress.stopBtn(false);
-    setStatus(`No compounds with biological data were found${useClaude?"":" — tick “also read drawn structures” so Claude reads the results tables first"}, so there is nothing to put in a compound deck.`, false); return; }
+    const sawStructs=verdicts.some(v=>v&&v.boxes&&v.boxes.length);
+    let msg;
+    if(!useClaude){
+      msg="No compounds with biological data were found. Open this in the claude.ai artifact (not a self-hosted copy) so Claude can read the results tables, then build the deck again.";
+    } else if(!readPages.size){
+      msg=`No candidate pages were found to read in ${esc(state.pdfName||"this PDF")}. Type the page range that holds the structures and the results tables in the range box, then press “Build deck now”.`;
+    } else if(sawStructs){
+      msg=`Claude read ${readPages.size} page(s) and located compound structures, but couldn't find a biological results table to pair them with. If the activity data is on specific pages, type that page range in the box and press “Build deck now”.`;
+    } else {
+      msg=`Claude read ${readPages.size} page(s) but found no biological results table. If you know which pages hold the DC₅₀/Dmax table, type that range in the box and press “Build deck now”.`;
+    }
+    setStatus(msg, false); return; }
 
   // crop each data-bearing compound's structure out of the pages where Claude located a bounding box
   Progress.set("Cropping compound structures", null, "");

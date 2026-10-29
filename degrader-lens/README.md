@@ -54,10 +54,14 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   off box; aspect ratio preserved, no squishing). A compound that has data but whose structure couldn't
   be located is still included with its data and a "structure not located" note. The read-off values are
   also merged into the app's Table, so ticking only the deck box (no separate full structure-read) still
-  fills in image-only data. The Claude sense-check runs its pages **in parallel** (much faster than
-  one-by-one). Honours the page-range box, caps the deck for speed, and saves through the downloads
-  capability (PptxGenJS). The optional, slower Claude structure-reading (into live SMILES) remains the
-  separate path.
+  fills in image-only data. **Results-table detection is lenient** — a degradation table that names the
+  assay only in its header (one "DC₅₀", one "Dmax") or a table continuation page is still caught — and if
+  Claude locates structures but finds no results table, a **fallback pass** reads the most number-dense
+  remaining pages to find the data. If the deck still comes up empty it says exactly what Claude saw and
+  suggests typing the results-table page range. The Claude sense-check runs its pages **in parallel**
+  (much faster than one-by-one). Honours the page-range box, caps the deck for speed, and saves through
+  the downloads capability (PptxGenJS). The optional, slower Claude structure-reading (into live SMILES)
+  remains the separate path.
 - **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
   **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
   DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,
