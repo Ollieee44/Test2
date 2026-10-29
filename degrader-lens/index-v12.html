@@ -2289,11 +2289,12 @@ async function deckCandidates(pdf, pageTexts, range, scanned, ctl, cap, broad){
 async function senseCheckPage(pdf, p, ctl){
   try{ const blob=await renderPdfPage(pdf, p, 1.6);
     const prompt=`This is one page of a patent. Reply ONLY JSON:
-{"type":"structures"|"data_table"|"both"|"other","example_numbers":[<compound/example numbers shown, as strings>],"has_activity_data":true|false,"rows":[{"id":"<compound number>","dc50_nm":<num>,"dmax_pct":<num>,"ic50_nm":<num>,"ec50_nm":<num>,"ki_nm":<num>}]}
+{"type":"structures"|"data_table"|"both"|"other","example_numbers":[<numbers as strings>],"has_activity_data":true|false,"rows":[{"id":"<compound number>","dc50_nm":<num>,"dmax_pct":<num>,"ic50_nm":<num>,"ec50_nm":<num>,"ki_nm":<num>}],"boxes":[{"id":"<compound number>","box":[x,y,w,h]}]}
 "type": "structures" = final example/claimed compound chemical STRUCTURES (not synthesis schemes/intermediates); "data_table" = a table of biological/degradation RESULTS; "both"; "other" = schemes, reagents, general text, assay protocols.
 "example_numbers": the compound numbers visible on this page.
 "has_activity_data": true if any biological activity value is visible here.
-"rows": ONLY if this page shows a RESULTS TABLE — one object per compound row, with the numeric values you can read. Concentrations in nM (convert µM→nM ×1000, pM→nM ÷1000); Dmax/% as a percent. Omit a key you can't read; use [] if this page has no results table. Do NOT include synthesis yields, masses or purities.
+"rows": ONLY if this page shows a RESULTS TABLE — one per compound row, numeric values you can read. Concentrations in nM (µM→nM ×1000, pM→nM ÷1000); Dmax/% as a percent. Omit a key you can't read; [] if no results table. No yields/masses/purities.
+"boxes": for each NUMBERED COMPOUND whose chemical STRUCTURE is drawn on this page, a tight bounding box around the whole drawn structure as [x,y,w,h] fractions of the page (0..1, origin top-left). [] if no structures are drawn.
 No text outside the JSON.`;
     const r=await state.sample.json(prompt,{images:[blob],modelTier:"quick",signal:ctl.signal});
     if(!r||typeof r!=="object") return {keep:false};
@@ -2301,7 +2302,9 @@ No text outside the JSON.`;
     const ex=exRaw.map(x=>cmpdKey(x));
     const rows=(Array.isArray(r.rows)?r.rows:[]).map(row=>({ id:String(row.id!=null?row.id:""), data:cleanAssay(row) }))
       .filter(x=>x.id && Object.keys(x.data).length);
-    return {type, examples:ex, examplesRaw:exRaw, hasData:!!r.has_activity_data, rows};
+    const boxes=(Array.isArray(r.boxes)?r.boxes:[]).map(bx=>({ id:String(bx.id!=null?bx.id:""), box:Array.isArray(bx.box)?bx.box.map(Number):null }))
+      .filter(bx=>bx.id && bx.box && bx.box.length===4 && bx.box.every(v=>v>=0&&v<=1));
+    return {type, examples:ex, examplesRaw:exRaw, hasData:!!r.has_activity_data, rows, boxes, page:p};
   }catch(e){ if(e&&e.code==="cancelled") throw e; return {keep:false}; }
 }
 // Merge Claude-read result rows into the compound set (fill gaps; never overwrite existing values).
@@ -2327,94 +2330,78 @@ async function buildScanDeck(pdf, pageTexts, opts){
   Progress.start("Building PowerPoint scan deck", "choosing pages"); Progress.stopBtn(true,()=>ctl.abort());
   const useClaude = state.sample && state.sampleImages && opts.senseCheck!==false;
   let cands=await deckCandidates(pdf, pageTexts, range, scanned, ctl, 150, useClaude);
-  let kept, nRead=0;
+  let nRead=0, verdicts=[];
   if(useClaude && cands.length){
     Progress.set("Reading pages with Claude (structures + results tables)", 0, `0 / ${cands.length} pages`);
-    const verdicts=await mapPool(cands, 4, c=>senseCheckPage(pdf, c.p, ctl),
+    verdicts=await mapPool(cands, 4, c=>senseCheckPage(pdf, c.p, ctl),
       d=>Progress.set("Reading pages with Claude (structures + results tables)", d/cands.length, `${d} / ${cands.length} pages`));
-    // merge activity values read off results-table pages so the slide tables fill even for image tables
+    // merge activity values read off results-table pages (so data exists even for image-only tables)
     const readRows=[]; verdicts.forEach(v=>{ if(v&&v.rows) readRows.push(...v.rows); });
     nRead=mergeReadData(readRows); if(nRead){ try{ refreshAll(); }catch(e){} }
-    dataKeys=dataBearingKeys();
-    // keep data tables + structure pages, dropping only schemes/text ("other"). When we can reliably
-    // link structure pages to data (some do), keep just those; otherwise keep ALL structure pages
-    // rather than over-dropping (compound-number matching between pages is not always reliable).
-    const tablePages=[], structPages=[];
-    cands.forEach((c,i)=>{ const v=verdicts[i]||{}; const t=v.type;
-      if(t==="data_table"||t==="both") tablePages.push({p:c.p, isTable:true, examples:v.examples, examplesRaw:v.examplesRaw});
-      else if(t==="structures") structPages.push({p:c.p, isTable:false, examples:v.examples, examplesRaw:v.examplesRaw, linked: !!(v.hasData || (v.examples||[]).some(k=>dataKeys.has(k)))});
-      else if(!v.type) structPages.push({p:c.p, isTable:false, examples:[], examplesRaw:[], linked:false}); });  // unclassified (error) → treat as a page to show
-    const linked=structPages.filter(s=>s.linked);
-    const chosenStructs = linked.length ? linked : structPages;
-    kept=[...tablePages, ...chosenStructs];
-    if(!kept.length) kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[],examplesRaw:[]}));   // safety net
-  } else {
-    kept=cands.map(c=>({p:c.p,isTable:c.isTable,examples:[],examplesRaw:[]}));
   }
   if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
-  if(!kept.length){ Progress.hide(); Progress.stopBtn(false); toast("No structure/results pages found to screenshot."); return; }
-  kept.sort((a,b)=>a.p-b.p);
+  dataKeys=dataBearingKeys();
 
-  // columns to tabulate (recomputed AFTER any Claude-read data was merged) + table builders
+  // assay columns (DC50/Dmax first) + value formatter
   const assays=assayKeys(); const pri=["dc50_nm","dmax_pct","target_ic50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","gi50_nm"];
-  const cols=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))].slice(0,4);
+  const cols=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))].slice(0,5);
   const colHdr=cols.map(k=>{ const m=labelMeta(k); return m.label+(m.unit?` (${m.unit})`:""); });
   const fmtCell=(c,k)=>{ const v=c.data&&c.data[k]; if(v==null) return "–"; const m=labelMeta(k); return typeof v==="number"?fmtNum(v,m.unit==="%"?0:1):String(v); };
-  // every compound named on the page (sense-check numbers + text), mapped to its record when we have
-  // one (for data), else a stub id — so the slide ALWAYS gets a table lining ids up with the structures,
-  // with "–" where a value is unknown.
-  const byKey=new Map(state.compounds.map(c=>[cmpdKey(c.id),c]));
-  const compoundsForPage=(pageText,examplesRaw)=>{ const order=[], seen=new Set();
-    const push=id=>{ const k=cmpdKey(id); if(!k||seen.has(k))return; seen.add(k); order.push({k,id:String(id)}); };
-    (examplesRaw||[]).forEach(push);
-    extractPatentRecords(pageText||"").forEach(r=>push(r.id));
-    return order.slice(0,16).map(o=>{ const c=byKey.get(o.k); return c || {id:o.id, data:{}, desc:{}}; }); };
-  const dataTable=(cs,max)=>{ cs=cs.slice(0,max||16); if(!cs.length) return null;
-    const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),{text:"Linker",options:{bold:true,fill:"EEF0F4"}}];
-    const rows=[head];
-    cs.forEach(c=>rows.push([ {text:String(c.id),options:{bold:true}}, ...cols.map(k=>fmtCell(c,k)), (c.desc&&c.desc.linker_len!=null?String(c.desc.linker_len):"–") ]));
-    return rows; };
-  const tblW=4.55, tblColW=[0.95, ...cols.map(()=> (tblW-0.95-0.6)/Math.max(1,cols.length)), 0.6];
+  const numId=id=>{ const m=String(id).match(/\d+/); return m?parseInt(m[0],10):1e9; };
+
+  // the compounds to present: ONLY numbered compounds that have biological data
+  const present=state.compounds.filter(c=>(c.valid||c.dataOnly)&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null));
+  present.sort((a,b)=> numId(a.id)-numId(b.id) || String(a.id).localeCompare(String(b.id)));
+  if(!present.length){ Progress.hide(); Progress.stopBtn(false);
+    setStatus(`No compounds with biological data were found${useClaude?"":" — tick “also read drawn structures” so Claude reads the results tables first"}, so there is nothing to put in a compound deck.`, false); return; }
+
+  // crop each data-bearing compound's structure out of the pages where Claude located a bounding box
+  Progress.set("Cropping compound structures", null, "");
+  const crops=new Map(); const want=new Set(present.map(c=>cmpdKey(c.id)));
+  const boxPages=verdicts.filter(v=>v&&v.boxes&&v.boxes.length&&(v.type==="structures"||v.type==="both"));
+  for(const v of boxPages){ if(ctl.signal.aborted) break;
+    const need=v.boxes.filter(bx=>want.has(cmpdKey(bx.id))&&!crops.has(cmpdKey(bx.id)));
+    if(!need.length) continue;
+    let canvas; try{ canvas=await renderPdfPageCanvas(pdf, v.page, 2); }catch(e){ continue; }
+    need.forEach(bx=>{ try{ crops.set(cmpdKey(bx.id), {id:bx.id, ...cropCanvasBox(canvas, bx.box)}); }catch(e){} }); }
 
   const pptx=new PptxGenJS(); pptx.defineLayout({name:"DL",width:10,height:7.5}); pptx.layout="DL";
-  pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — structure + data scan";
-  // summary slide first: the whole data table for navigation
-  const allData=state.compounds.filter(c=>(c.valid||c.dataOnly)&&c.data&&Object.keys(c.data).some(k=>!QC_KEYS.includes(k)&&c.data[k]!=null));
-  if(allData.length){ const s0=pptx.addSlide();
-    s0.addText(`${esc(state.pdfName||"Patent")} — ${allData.length} compound(s) with data`,{x:0.3,y:0.2,w:9.4,h:0.5,fontSize:16,bold:true,color:"1A222C"});
-    const rows=dataTable(allData,24);
-    if(rows) s0.addTable(rows,{x:0.3,y:0.85,w:9.4,colW:[1.1,...cols.map(()=> (9.4-1.1-1.0)/Math.max(1,cols.length)),1.0],fontSize:10,border:{pt:0.5,color:"DDDDDD"},valign:"middle"});
-    if(allData.length>24) s0.addText(`…and ${allData.length-24} more (see the slides).`,{x:0.3,y:7.0,w:9,h:0.3,fontSize:9,italic:true,color:"777777"});
+  pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — compounds + data";
+  const colWfor=w=>{ const idw=Math.min(1.2,w*0.2), lnk=Math.min(0.7,w*0.12); return [idw, ...cols.map(()=> (w-idw-lnk)/Math.max(1,cols.length)), lnk]; };
+  const masterRows=(cs,hiKey,max)=>{ cs=cs.slice(0,max||24);
+    const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),{text:"Linker",options:{bold:true,fill:"EEF0F4"}}];
+    const rows=[head];
+    cs.forEach(c=>{ const o=(hiKey&&cmpdKey(c.id)===hiKey)?{fill:"FDEEC8"}:{};
+      rows.push([ {text:String(c.id),options:Object.assign({bold:true},o)}, ...cols.map(k=>({text:fmtCell(c,k),options:o})), {text:(c.desc&&c.desc.linker_len!=null?String(c.desc.linker_len):"–"),options:o} ]); });
+    return rows; };
+
+  // slide 1: master data table of every compound with data
+  { const s0=pptx.addSlide();
+    s0.addText(`${esc(state.pdfName||"Patent")} — ${present.length} compound(s) with biological data`,{x:0.3,y:0.2,w:9.4,h:0.5,fontSize:16,bold:true,color:"1A222C"});
+    s0.addTable(masterRows(present,null,28),{x:0.3,y:0.85,w:9.4,colW:colWfor(9.4),fontSize:10,border:{pt:0.5,color:"DDDDDD"},valign:"middle",autoPage:true,autoPageRepeatHeader:true});
   }
-  const IMW=4.55, IMH=6.4, IX=0.25, IY=0.8;   // image box (left) when a table sits on the right
-  let done=0, nTable=0, nTabled=0;
-  for(const k of kept){ if(ctl.signal.aborted) break; const p=k.p;
-    Progress.set("Building PowerPoint scan deck", done/kept.length, `page ${p} — slide ${done+1} / ${kept.length}`);
-    try{ const blob=await renderPdfPage(pdf, p, 1.7); const url=await blobToDataURL(blob);
-      const dim=await imageSize(url); const ar=(dim.w&&dim.h)?dim.w/dim.h:0.773;
-      const slide=pptx.addSlide();
-      const cs=compoundsForPage(pageTexts[p-1], k.examplesRaw);
-      const rows=dataTable(cs,16);
-      const tag=k.isTable?"Biology data table":"Structures";
-      slide.addText(`Page ${p} · ${tag}`,{x:0.25,y:0.12,w:9.5,h:0.5,fontSize:13,bold:true,color:"1A222C"});
-      if(rows){ // structures (left) + their data table (right)
-        let w=IMW, h=IMW/ar; if(h>IMH){ h=IMH; w=IMH*ar; } const x=IX+(IMW-w)/2, y=IY+(IMH-h)/2;
-        slide.addImage({ data:url, x, y, w, h });
-        slide.addTable(rows,{x:5.1, y:0.8, w:tblW, colW:tblColW, fontSize:9, border:{pt:0.5,color:"DDDDDD"}, valign:"middle", autoPage:false});
-        nTabled++;
-      } else { // no per-page data found — show the page full width
-        const AVW=9.5,AVH=6.55; let w=AVW,h=AVW/ar; if(h>AVH){h=AVH;w=AVH*ar;} const x=0.25+(AVW-w)/2,y=0.8+(AVH-h)/2;
-        slide.addImage({ data:url, x, y, w, h });
-      }
-      if(k.isTable) nTable++;
-    }catch(e){}
+  // one slide per compound: cropped structure (left) + data (right). Master table on each slide while
+  // it comfortably fits; otherwise this compound's own row.
+  const showMaster = present.length<=16;
+  let done=0, withCrop=0;
+  for(const c of present){ if(ctl.signal.aborted) break; const key=cmpdKey(c.id); const crop=crops.get(key);
+    Progress.set("Building the deck", done/present.length, `${c.id} — slide ${done+2} / ${present.length+1}`);
+    const slide=pptx.addSlide();
+    slide.addText(String(c.id)+(c.series&&/comparative/i.test(c.series)?"  (comparative)":""),{x:0.3,y:0.15,w:9.4,h:0.5,fontSize:18,bold:true,color:"1A222C"});
+    const IMW=5.0,IMH=6.1,IX=0.3,IY=0.9;
+    if(crop){ const ar=crop.ar||0.9; let w=IMW,h=IMW/ar; if(h>IMH){h=IMH;w=IMH*ar;}
+      slide.addImage({data:crop.dataUrl, x:IX+(IMW-w)/2, y:IY+(IMH-h)/2, w, h}); withCrop++; }
+    else { slide.addText("structure not located on the read pages",{x:IX,y:3.2,w:IMW,h:0.6,fontSize:11,italic:true,color:"999999",align:"center"}); }
+    const RX=5.55, RW=4.15;
+    if(showMaster) slide.addTable(masterRows(present,key,16),{x:RX,y:0.9,w:RW,colW:colWfor(RW),fontSize:8,border:{pt:0.5,color:"DDDDDD"},valign:"middle",autoPage:false});
+    else slide.addTable(masterRows([c],null,1),{x:RX,y:0.9,w:RW,colW:colWfor(RW),fontSize:12,border:{pt:0.5,color:"DDDDDD"},valign:"middle",autoPage:false});
     done++;
   }
-  Progress.set("Building PowerPoint scan deck", 1, "assembling file");
+  Progress.set("Building the deck", 1, "assembling file");
   let buf; try{ buf=await pptx.write({ outputType:"arraybuffer" }); }catch(e){ Progress.hide(); Progress.stopBtn(false); setStatus("Couldn't assemble the PowerPoint: "+e.message,false); return; }
   Progress.done(); Progress.stopBtn(false);
-  await saveFile("degrader_structure_scan.pptx", buf);
-  setStatus(`✓ PowerPoint scan deck: ${allData.length?"summary + ":""}${done} page slide(s) — ${done-nTable} structure page(s) + ${nTable} data-table page(s), ${nTabled} with a data table alongside${nRead?`; Claude read data for ${nRead} compound(s)`:(useClaude?", Claude-checked":"")}.`, true);
+  await saveFile("degrader_compounds.pptx", buf);
+  setStatus(`✓ PowerPoint: summary table + ${done} compound slide(s), ${withCrop} with a cropped structure${present.length-withCrop?` (${present.length-withCrop} structure${present.length-withCrop===1?"":"s"} not located)`:""}${nRead?`; Claude read data for ${nRead} compound(s)`:""}. Only numbered compounds with biological data are included — no page/scheme screenshots.`, true);
 }
 // --- OCSR accuracy: formula cross-check + confidence -> "needs review" ---
 function formulaFromSmiles(smiles){ return withMol(smiles,m=>{ try{ const ic=m.get_inchi(); const mm=ic.match(/^InChI=1S?\/([^\/]+)/); return mm?mm[1]:null; }catch(e){ return null; } }); }
@@ -2631,14 +2618,29 @@ function updateClaudeUI(){
       : "This runs only in the published claude.ai artifact (where the page can call Claude). On a locally-served copy, use the paste/CSV routes or the OCSR backend instead.";
   }
 }
-async function renderPdfPage(pdfDoc,n,scale){
+async function renderPdfPageCanvas(pdfDoc,n,scale){
   const page=await pdfDoc.getPage(n);
   const vp=page.getViewport({scale:scale||2});
   const canvas=document.createElement("canvas"); canvas.width=Math.min(2200,vp.width); canvas.height=Math.round(canvas.width*vp.height/vp.width);
   const sc=canvas.width/vp.width; const vp2=page.getViewport({scale:(scale||2)*sc});
   const ctx=canvas.getContext("2d"); ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
   await page.render({canvasContext:ctx,viewport:vp2}).promise;
+  return canvas;
+}
+async function renderPdfPage(pdfDoc,n,scale){
+  const canvas=await renderPdfPageCanvas(pdfDoc,n,scale);
   return await new Promise(res=>canvas.toBlob(res,"image/png"));
+}
+// Crop a normalized box [x,y,w,h] (0..1, top-left origin) out of a page canvas → {dataUrl, ar}. Pads
+// a little so a slightly-off box still contains the whole structure.
+function cropCanvasBox(canvas, box, pad){
+  pad = pad==null?0.03:pad;
+  let [x,y,w,h]=box; x-=pad; y-=pad; w+=2*pad; h+=2*pad;
+  x=Math.max(0,Math.min(1,x)); y=Math.max(0,Math.min(1,y)); w=Math.max(0.02,Math.min(1-x,w)); h=Math.max(0.02,Math.min(1-y,h));
+  const sx=Math.round(x*canvas.width), sy=Math.round(y*canvas.height), sw=Math.round(w*canvas.width), sh=Math.round(h*canvas.height);
+  const c=document.createElement("canvas"); c.width=sw; c.height=sh; const ctx=c.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,sw,sh); ctx.drawImage(canvas, sx,sy,sw,sh, 0,0,sw,sh);
+  return { dataUrl:c.toDataURL("image/png"), ar: sw/sh };
 }
 function showPdfPagePicker(){
   const wrap=$("#pdfPageWrap"); if(!wrap) return;

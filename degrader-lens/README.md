@@ -39,26 +39,25 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
 
 ## Versions
 
-- **`index-v12.html`** — v11 plus a **PowerPoint "structures + data" scan deck** built straight from a
-  patent PDF. Tick *"also spit out a PowerPoint of structures + data"* (or press **Build deck now**) and
-  it screenshots the relevant pages into a `.pptx` — one page per slide, each captioned with the
-  compound numbers and any DC₅₀/Dmax — for a quick side-by-side scan. It targets the pages that show
-  **example structures whose compounds have biological data**, plus the **results-table** pages:
-  candidates are picked fast from the text pass (a page is a candidate if it's a results table with
-  several assay values, or carries drawings and names a data-bearing compound), and when Claude is
-  available it **sense-checks each candidate page image** so synthesis schemes are dropped, structure
-  pages are kept only when their compounds have activity, and a data table with no drawings is still
-  caught. **Every slide carries the biological data alongside the structures** — a compact table of the
-  compounds on that page (DC₅₀, Dmax, other assays, linker length) so a chemist can go
-  compound-by-compound — the table lists **every compound named on the page** lined up with the
-  structures, filled with data where known and "–" where not, so a table appears on each slide even
-  before any data is read — and the deck opens with a **summary slide** of the whole set. The sense-check
-  pass **also reads the activity values straight off the results-table pages** and merges them, so the
-  slide tables fill in even when the data is an image and you only ticked the deck box (no separate
-  full structure-read needed); it also surfaces that data in the app's Table. Slides preserve each page's aspect ratio (no squishing). The Claude sense-check runs its
-  pages **in parallel** (much faster than one-by-one). Honours the page-range box, caps the deck for
-  speed, and saves through the downloads capability (PptxGenJS). The optional, slower Claude
-  structure-reading (into live SMILES) remains the separate path.
+- **`index-v12.html`** — v11 plus a **compound-centric PowerPoint deck** built straight from a patent
+  PDF. Tick *"also spit out a PowerPoint of structures + data"* (or press **Build deck now**) and it
+  produces a `.pptx` that contains **only numbered compounds that have biological data**, each shown
+  **side-by-side with its activity data** — no page/scheme screenshots. The deck opens with a **summary
+  slide**: a master table of every compound with data (DC₅₀, Dmax, other assays, linker length). Then
+  **one slide per compound**: its chemical structure (left) next to the data (right) — the master table
+  with that compound's row highlighted while the set is small enough to fit, otherwise that compound's
+  own row. Candidates are picked fast from the text pass (results-table pages, plus any page carrying
+  drawings), then Claude **sense-checks each candidate page image**: it classifies the page, reads the
+  activity values straight off results tables (so data exists even when the table is an image), and
+  returns a **bounding box for each numbered compound's drawn structure**. The deck then **crops each
+  data-bearing compound's structure** out of its page using those boxes (a small pad covers a slightly-
+  off box; aspect ratio preserved, no squishing). A compound that has data but whose structure couldn't
+  be located is still included with its data and a "structure not located" note. The read-off values are
+  also merged into the app's Table, so ticking only the deck box (no separate full structure-read) still
+  fills in image-only data. The Claude sense-check runs its pages **in parallel** (much faster than
+  one-by-one). Honours the page-range box, caps the deck for speed, and saves through the downloads
+  capability (PptxGenJS). The optional, slower Claude structure-reading (into live SMILES) remains the
+  separate path.
 - **`index-v11.html`** — v10 plus **exports, a scan sheet, QC validation, and patent-by-ID input.**
   **Exports** (Data table): **Excel (.xlsx)**, **SDF** (molfiles + SD tags — the native format for
   DataWarrior / Vortex), and CSV, each carrying the curated SMILES, region method, linker length,
