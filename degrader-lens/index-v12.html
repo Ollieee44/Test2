@@ -2284,22 +2284,6 @@ function looksLikeResultsTable(t, norm){
   if(cmpdMentions>=4 && nums>=12) return true;
   return false;
 }
-async function deckCandidates(pdf, pageTexts, range, scanned, ctl, cap, broad){
-  cap=cap||150; const dataKeys=dataBearingKeys();
-  const explicitRange = !!(range&&range.length);
-  const pool = explicitRange ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
-  const out=[];
-  for(const p of pool){ if(ctl&&ctl.signal.aborted) break; if(out.length>=cap) break;
-    const t=pageTexts[p-1]||""; const norm=normalizeAssayText(t);
-    const isTable = looksLikeResultsTable(t, norm);                // a results table (text) — lenient
-    if(explicitRange){ out.push({p, isTable}); continue; }         // you chose these pages — consider them all
-    const recs=extractPatentRecords(t); const namesData = recs.some(r=>dataKeys.has(cmpdKey(r.id)));
-    let gfx=false; if(!isTable) gfx = scanned ? true : await pageHasGraphics(pdf,p);
-    const keep = isTable || (broad ? gfx : (gfx && (namesData || (scanned && !dataKeys.size))));
-    if(keep) out.push({p, isTable});
-  }
-  return out;
-}
 // Claude sense-check of a candidate page image: classify it AND, for a results table, read the
 // activity values so the deck's data tables can be filled even when the data is image-only.
 async function senseCheckPage(pdf, p, ctl){
@@ -2345,47 +2329,70 @@ async function buildScanDeck(pdf, pageTexts, opts){
 
   Progress.start("Building PowerPoint scan deck", "choosing pages"); Progress.stopBtn(true,()=>ctl.abort());
   const useClaude = state.sample && state.sampleImages && opts.senseCheck!==false;
-  let cands=await deckCandidates(pdf, pageTexts, range, scanned, ctl, 150, useClaude);
+  const explicitRange = !!(range && range.length);
+  const pool = explicitRange ? range.slice() : Array.from({length:pdf.numPages},(_,i)=>i+1);
   let nRead=0, verdicts=[]; const readPages=new Set();
-  if(useClaude && cands.length){
-    Progress.set("Reading pages with Claude (structures + results tables)", 0, `0 / ${cands.length} pages`);
-    verdicts=await mapPool(cands, 4, c=>senseCheckPage(pdf, c.p, ctl),
-      d=>Progress.set("Reading pages with Claude (structures + results tables)", d/cands.length, `${d} / ${cands.length} pages`));
-    cands.forEach(c=>readPages.add(c.p));
-    // merge activity values read off results-table pages (so data exists even for image-only tables)
-    const readRows=[]; verdicts.forEach(v=>{ if(v&&v.rows) readRows.push(...v.rows); });
-    nRead=mergeReadData(readRows); if(nRead){ try{ refreshAll(); }catch(e){} }
-  }
-  if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
-  dataKeys=dataBearingKeys();
+  const aborted=()=>{ if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return true; } return false; };
+  // read a set of pages with Claude (bounded concurrency), collect verdicts + merge any table data
+  const readWithClaude=async(pages,label)=>{
+    pages=pages.filter(p=>!readPages.has(p)); if(!pages.length) return;
+    Progress.set(label, 0, `0 / ${pages.length} pages`);
+    const vv=await mapPool(pages, 5, p=>senseCheckPage(pdf,p,ctl),
+      d=>Progress.set(label, d/pages.length, `${d} / ${pages.length} pages`));
+    vv.forEach(v=>{ if(v){ verdicts.push(v); if(v.page)readPages.add(v.page); } });
+    const rr=[]; vv.forEach(v=>{ if(v&&v.rows) rr.push(...v.rows); });
+    const n=mergeReadData(rr); if(n){ nRead+=n; try{ refreshAll(); }catch(e){} dataKeys=dataBearingKeys(); }
+  };
 
-  // Fallback: Claude located structures but read no activity values (the results table wasn't picked as a
-  // candidate — e.g. a plain text table on a page with no drawings the heuristics missed). Read the most
-  // number-dense pages we haven't looked at yet, in case the data is there.
-  if(useClaude && !dataKeys.size && !range){
-    const struckPages = verdicts.some(v=>v&&v.boxes&&v.boxes.length);
-    if(struckPages || !cands.length){
+  if(useClaude){
+    // STAGE 1 — read the RESULTS TABLES first (few pages, picked cheaply from text). This is what tells us
+    // which compounds have biological data, so the rest of the work is scoped to just those compounds.
+    const tablePages=pool.filter(p=>looksLikeResultsTable(pageTexts[p-1]||""));
+    await readWithClaude(tablePages, "Reading results tables with Claude"); if(aborted()) return;
+
+    // Fallback A: still no data → read the most number-dense remaining TEXT pages (bounded) for the table.
+    if(!dataKeys.size && !explicitRange){
       const scored=[];
-      for(let p=1;p<=pdf.numPages;p++){ if(readPages.has(p)) continue;
+      for(const p of pool){ if(readPages.has(p)) continue;
         const t=pageTexts[p-1]||""; const norm=normalizeAssayText(t);
         const assayKw=/\b(?:dc50|ic50|ec50|gi50|d\s*max|degradation|potency|binding|nm\b|µm|μm)\b/i.test(norm);
         const nums=(t.match(/\d{1,4}(?:[.,]\d+)?/g)||[]).length;
         const cmpd=(norm.match(new RegExp(CMPD_LABEL,"gi"))||[]).length;
-        const score=(assayKw?50:0)+nums+cmpd*5;
-        if(nums>=6) scored.push({p,score}); }
+        if(nums>=6) scored.push({p,score:(assayKw?50:0)+nums+cmpd*5}); }
       scored.sort((a,b)=>b.score-a.score);
-      const extra=scored.slice(0,15).map(s=>s.p);
-      if(extra.length){
-        Progress.set("Looking for the results table", 0, `0 / ${extra.length} pages`);
-        const vv=await mapPool(extra, 4, p=>senseCheckPage(pdf, p, ctl),
-          d=>Progress.set("Looking for the results table", d/extra.length, `${d} / ${extra.length} pages`));
-        vv.forEach(v=>{ if(v){ verdicts.push(v); if(v.page)readPages.add(v.page); } });
-        const rr=[]; vv.forEach(v=>{ if(v&&v.rows) rr.push(...v.rows); });
-        const n2=mergeReadData(rr); if(n2){ nRead+=n2; try{ refreshAll(); }catch(e){} dataKeys=dataBearingKeys(); }
-      }
+      await readWithClaude(scored.slice(0,15).map(s=>s.p), "Looking for the results table"); if(aborted()) return;
     }
-    if(ctl.signal.aborted){ Progress.hide(); Progress.stopBtn(false); return; }
+    // Fallback B: STILL no data → the results table is probably an image. Read graphics pages that carry
+    // little text (likely figures/tables), capped, so an image-only table is still found.
+    if(!dataKeys.size && !explicitRange){
+      const gp=[];
+      for(const p of pool){ if(readPages.has(p)||gp.length>=40) continue;
+        if((pageTexts[p-1]||"").replace(/\s/g,"").length>400) continue;   // text-heavy page: unlikely an image table
+        if(scanned || await pageHasGraphics(pdf,p)) gp.push(p); if(ctl.signal.aborted) break; }
+      await readWithClaude(gp, "Reading figures for a results table"); if(aborted()) return;
+    }
+
+    // STAGE 2 — read STRUCTURES, but only the pages that actually name a data-bearing compound in their
+    // text (so a 300-page patent reads a handful of pages, not every drawing/scheme). On an image/scanned
+    // patent whose pages carry no text, fall back to graphics pages, capped.
+    if(dataKeys.size){
+      const textPages=[]; let anyText=false; const labelRe=new RegExp(CMPD_LABEL,"gi");
+      for(const p of pool){ if(readPages.has(p)) continue;
+        const t=pageTexts[p-1]||""; if(t.replace(/\s/g,"").length) anyText=true;
+        labelRe.lastIndex=0; let m, hit=false;
+        while((m=labelRe.exec(t))){ if(dataKeys.has(cmpdKey(m[0]))){ hit=true; break; } }
+        if(hit) textPages.push(p); }
+      let structPages=textPages;
+      if(!structPages.length && !anyText){            // no usable page text → image patent: use graphics pages
+        const gp=[]; for(const p of pool){ if(readPages.has(p)||gp.length>=80) continue;
+          if(scanned || await pageHasGraphics(pdf,p)) gp.push(p); if(ctl.signal.aborted) break; }
+        structPages=gp;
+      }
+      if(aborted()) return;
+      await readWithClaude(structPages.slice(0,120), "Reading compound structures with Claude"); if(aborted()) return;
+    }
   }
+  dataKeys=dataBearingKeys();
 
   // assay columns (DC50/Dmax first) + value formatter
   const assays=assayKeys(); const pri=["dc50_nm","dmax_pct","target_ic50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","gi50_nm"];
