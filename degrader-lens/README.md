@@ -52,7 +52,12 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   returns a **bounding box for each numbered compound's drawn structure**. The deck then **crops each
   data-bearing compound's structure** out of its page using those boxes (a small pad covers a slightly-
   off box; aspect ratio preserved, no squishing). A compound that has data but whose structure couldn't
-  be located is still included with its data and a "structure not located" note. The read-off values are
+  be located is still included with its data and a "structure not located" note. **Activity is read in
+  whatever form the patent uses:** numeric potencies (DC₅₀/IC₅₀/EC₅₀/Dmax etc.), **qualitative ratings**
+  (a `+`/`++`/`+++` table or words like active/inactive — stored as a **Potency** column, charted as an
+  ordered category), and **IC₅₀/EC₅₀ values read off dose–response graphs** and their legends/captions.
+  When the patent defines what its symbols mean (e.g. "+++ = IC₅₀ < 10 nM"), that **key is captured and
+  printed** on the summary slide and in the status. The read-off values are
   also merged into the app's Table, so ticking only the deck box (no separate full structure-read) still
   fills in image-only data. The reading is **scoped so it stays fast on a full patent**: Claude reads the
   (few) **results-table pages first** — detection is lenient, so a table that names the assay only in its
