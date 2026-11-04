@@ -2287,6 +2287,8 @@ function looksLikeResultsTable(t, norm){
   if(plusRatings>=3) return true;
   // a dose–response GRAPH / figure of activity curves (caught from its caption text)
   if(assayKw && /\b(figure|fig\.?|curve|dose[\s-]?response|graph|plotted|titration)\b/i.test(t)) return true;
+  // an IMAGE table (no readable cells in the text layer) caught from its caption: "Table N" + activity word
+  if(/\b(?:table|tbl)\s*\d/i.test(t) && /\b(?:dc50|ic50|ec50|gi50|kd|ki|dmax|degrad|potency|binding|affinity|activity|inhibit)\w*/i.test(norm)) return true;
   return false;
 }
 // Claude sense-check of a candidate page image: classify it AND, for a results table, read the
@@ -2401,9 +2403,12 @@ async function buildScanDeck(pdf, pageTexts, opts){
   }
   dataKeys=dataBearingKeys();
 
-  // assay columns (DC50/Dmax first) + value formatter
+  // assay columns (DC50/Dmax first) + value formatter. Qualitative columns (a +/++/+++ or word potency)
+  // are ALWAYS kept — they're often the only activity a ligand patent reports — then numerics fill the rest.
   const assays=assayKeys(); const pri=["dc50_nm","dmax_pct","target_ic50_nm","ic50_nm","ec50_nm","ki_nm","kd_nm","gi50_nm"];
-  const cols=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))].slice(0,5);
+  const ordered=[...pri.filter(k=>assays.includes(k)), ...assays.filter(k=>!pri.includes(k))];
+  const qualCols=ordered.filter(k=>!keyIsNumeric(k)), numCols=ordered.filter(k=>keyIsNumeric(k));
+  const cols=[...numCols.slice(0, Math.max(1, 6-qualCols.length)), ...qualCols].slice(0,6);
   const colHdr=cols.map(k=>{ const m=labelMeta(k); return m.label+(m.unit?` (${m.unit})`:""); });
   const fmtCell=(c,k)=>{ const v=c.data&&c.data[k]; if(v==null) return "–"; const m=labelMeta(k); return typeof v==="number"?fmtNum(v,m.unit==="%"?0:1):String(v); };
   const numId=id=>{ const m=String(id).match(/\d+/); return m?parseInt(m[0],10):1e9; };
