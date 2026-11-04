@@ -579,6 +579,7 @@ const ASSAY_LABELS = { dc50_nm:["DC₅₀","nM",true], dmax_pct:["Dmax","%",fals
   ki_nm:["Ki","nM",true], kd_nm:["Kd","nM",true], ternary_kd_nm:["Ternary Kd","nM",true],
   gi50_nm:["GI₅₀","nM",true], pct_inhibition:["% inhibition","%",false], potency:["Potency",""] };
 function labelMeta(key){ const m=ASSAY_LABELS[key]; if(m) return {label:m[0],unit:m[1]||"",log:!!m[2]};
+  const dyn=state.assayLabels&&state.assayLabels[key]; if(dyn) return {label:dyn.label,unit:dyn.unit||"",log:!!dyn.log};
   let unit="",k=String(key);
   if(/_nm$/.test(k)){unit="nM";k=k.slice(0,-3);} else if(/_um$/.test(k)){unit="µM";k=k.slice(0,-3);}
   else if(/_pct$/.test(k)){unit="%";k=k.slice(0,-4);} else if(/_pm$/.test(k)){unit="pM";k=k.slice(0,-3);}
@@ -592,7 +593,7 @@ const state = {
   filterE3:new Set(), query:"",
   sort:{key:"id",dir:1}, hlSmarts:"",
   chart:{x:"linker_len",y:"dc50_nm",log:true,xlog:false,color:"ligase",xmin:null,xmax:null,ymin:null,ymax:null},
-  sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null,
+  sample:null, sampleImages:false, pdfDoc:null, pdfName:"", claudeBlob:null, assayLabels:{}, assayLegends:[],
   keepUnnumbered:false, detectedTargets:[], filterReview:false, showRegions:false, ocsrTier:"quick", regionTemplates:{e3:[],war:[]},
   learn:{on:true,min:3,exemplars:[]},
   chat:{history:[],busy:false},
@@ -1622,7 +1623,8 @@ function categoricalFields(){ return assayKeys().filter(k=>!keyIsNumeric(k)).map
 function allChartFields(){ return [...numericFields(),...categoricalFields()]; }
 // order category values low→high potency where recognisable (+ buckets by count, letter grades)
 function catOrder(key){ const vals=[...new Set(state.compounds.map(c=>c.data&&c.data[key]).filter(v=>v!=null).map(String))];
-  if(vals.every(v=>/^\++$/.test(v))) return vals.sort((a,b)=>a.length-b.length);
+  const rank=v=>v==="–"?0:(/^\++$/.test(v)?v.length:NaN);          // – (weakest) < + < ++ < +++
+  if(vals.every(v=>!isNaN(rank(v)))) return vals.sort((a,b)=>rank(a)-rank(b));
   if(vals.every(v=>/^[A-E]$/i.test(v))) return vals.sort((a,b)=>b.toUpperCase().localeCompare(a.toUpperCase()));
   return vals.sort(); }
 function fieldVal(c,key){ // data (assay) values plot even for data-only rows; descriptors need a structure
@@ -2291,29 +2293,87 @@ function looksLikeResultsTable(t, norm){
   if(/\b(?:table|tbl)\s*\d/i.test(t) && /\b(?:dc50|ic50|ec50|gi50|kd|ki|dmax|degrad|potency|binding|affinity|activity|inhibit)\w*/i.test(norm)) return true;
   return false;
 }
+// a stable short key from an assay column header ("ThT 2N4R Assay EC50 (µM)" → "tht_2n4r_assay_ec50")
+function slugifyAssay(name){
+  return String(name||"").toLowerCase()
+    .replace(/\([^)]*\)/g," ")                 // drop parenthetical units/notes
+    .replace(/[⁰-⁹¹²³]/g," ").replace(/\s*\^\(?\d+\)?\s*$/,"") // caret footnote markers
+    .replace(/[µμ]/g,"u").replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40) || "assay";
+}
+// a readable column label from the header (unit/footnote stripped, EC50→EC₅₀ etc.)
+function prettyAssayLabel(name){
+  let s=String(name||"")
+    .replace(/\b(DC|IC|EC|GI)\s*50\b/gi,(m,a)=>a.toUpperCase()+"₅₀")   // subscript BEFORE stripping numbers
+    .replace(/\((?:µM|μM|uM|nM|pM|%|nanomolar|micromolar)\)/gi,"")      // unit in parens
+    .replace(/[⁰-⁹¹²³]/g,"")                   // superscript footnotes
+    .replace(/\s*(?:\^\(?\d+\)?|\(\d+\))\s*$/,"")                       // trailing (1) / ^(1) footnote
+    .replace(/\s+/g," ").trim();
+  return s.slice(0,48) || "Activity";
+}
+// Turn Claude's {assay_columns, rows:[{id,cells}]} into {rows:[{id,data}], labels, legends}. Each table
+// column becomes its OWN assay key, so a page with several +/++/+++ columns (e.g. two EC50 assays plus a
+// % inhibition) keeps them separate instead of collapsing into one. Columns are numeric or qualitative
+// depending on their cell values; "nd"/blank = not determined (no value); "–" = the weakest rating bin.
+function ingestAssayColumns(acols, rawRows){
+  const ncol=acols.length;
+  const colCells=Array.from({length:ncol},()=>[]);
+  rawRows.forEach(row=>{ const cells=Array.isArray(row&&row.cells)?row.cells:[]; for(let i=0;i<ncol;i++) colCells[i].push(cells[i]); });
+  const isNd=s=>/^(nd|n\/?d|n\.?d\.?|na|n\/a|not\s*determined|not\s*tested|\.|·)$/i.test(String(s==null?"":s).trim());
+  const defs=acols.map((c,i)=>{
+    const vals=colCells[i].map(x=>String(x==null?"":x).trim()).filter(x=>x&&!isNd(x));
+    const numericish=vals.filter(v=>/\d/.test(v) && !/^[+\-–—−]+$/.test(v)).length;
+    const numeric = vals.length>0 && numericish>=Math.ceil(vals.length*0.6);
+    const unit=c.unit || (String(c.name).match(/\((µM|μM|uM|nM|pM|%)\)/i)||[])[1] || "";
+    const base=slugifyAssay(c.name);
+    let key = numeric ? base.replace(/_(um|µm|nm|pm|pct|percent)$/,"")+(/%/.test(unit)?"_pct":"_nm") : base;
+    return {name:c.name, legend:c.legend, numeric, unit, key, label:prettyAssayLabel(c.name)};
+  });
+  const seen={}; defs.forEach(d=>{ if(seen[d.key]!=null){ seen[d.key]++; d.key=d.key+"_"+seen[d.key]; } else seen[d.key]=1; });
+  const toNum=(s,unit)=>{ const m=String(s).replace(/,/g,"").match(/-?\d+(?:\.\d+)?/); if(!m) return null; let n=parseFloat(m[0]); if(!isFinite(n)) return null;
+    const u=(unit||"").toLowerCase(); if(/%/.test(u)) return n; if(/u|µ|μ/.test(u)) n*=1000; else if(/pm/.test(u)) n/=1000; else if(/mm/.test(u)) n*=1e6; return n; };
+  const normCell=(raw,d)=>{ let s=String(raw==null?"":raw).trim(); if(!s||isNd(s)) return null;
+    if(d.numeric) return toNum(s,d.unit);
+    if(/^[+]{1,4}$/.test(s)) return s;
+    if(/^[–—\-−]{1,2}$/.test(s)) return "–";
+    if(s.length<=16) return s.replace(/\s+/g," "); return null; };
+  const rows=[];
+  rawRows.forEach(row=>{ const id=String(row&&row.id!=null?row.id:"").trim(); if(!id) return;
+    const cells=Array.isArray(row&&row.cells)?row.cells:[]; const data={};
+    defs.forEach((d,i)=>{ const v=normCell(cells[i],d); if(v!=null) data[d.key]=v; });
+    if(Object.keys(data).length) rows.push({id,data}); });
+  const labels={}; defs.forEach(d=>{ labels[d.key]={label:d.label, unit:d.numeric?(/%/.test(d.unit)?"%":"nM"):"", log:d.numeric&&/_nm$/.test(d.key)}; });
+  const legends=defs.filter(d=>d.legend).map(d=>`${d.label}: ${d.legend}`.replace(/\s+/g," ").slice(0,160));
+  return {rows, labels, legends};
+}
 // Claude sense-check of a candidate page image: classify it AND, for a results table, read the
 // activity values so the deck's data tables can be filled even when the data is image-only.
 async function senseCheckPage(pdf, p, ctl){
   try{ const blob=await renderPdfPage(pdf, p, 1.6);
     const prompt=`This is one page of a patent. Reply ONLY JSON:
-{"type":"structures"|"data_table"|"both"|"other","example_numbers":[<numbers as strings>],"has_activity_data":true|false,"legend":"<string>","rows":[{"id":"<compound number>","dc50_nm":<num>,"dmax_pct":<num>,"ic50_nm":<num>,"ec50_nm":<num>,"ki_nm":<num>,"potency":"<qualitative rating>"}],"boxes":[{"id":"<compound number>","box":[x,y,w,h]}]}
-"type": "structures" = final example/claimed compound chemical STRUCTURES (not synthesis schemes/intermediates); "data_table" = ANY presentation of biological/activity RESULTS, including a numeric table, a table that rates activity with symbols (+, ++, +++) or words (active/inactive), OR a DOSE–RESPONSE GRAPH / figure of activity curves; "both"; "other" = schemes, reagents, general text, assay protocols.
+{"type":"structures"|"data_table"|"both"|"other","example_numbers":[<numbers as strings>],"has_activity_data":true|false,"assay_columns":[{"name":"<exact column header>","unit":"<µM|nM|pM|% or ''>","legend":"<this column's symbol key, or ''>"}],"rows":[{"id":"<compound number>","cells":["<value in each assay column, SAME ORDER>"]}],"boxes":[{"id":"<compound number>","box":[x,y,w,h]}]}
+"type": "structures" = final example/claimed compound chemical STRUCTURES (not synthesis schemes/intermediates); "data_table" = ANY presentation of biological/activity RESULTS, including a numeric table, a table that rates activity with symbols (+, ++, +++, –) or words (active/inactive), OR a DOSE–RESPONSE GRAPH / figure of activity curves; "both"; "other" = schemes, reagents, general text, assay protocols.
 "example_numbers": the compound numbers visible on this page.
 "has_activity_data": true if any biological activity value OR rating is visible here (including in a graph).
-"legend": if the page defines what the activity symbols/bins mean (e.g. "+++ = IC50 < 10 nM"), copy that key verbatim; else "".
-"rows": one per compound whose activity you can read here, from a table OR a dose–response graph/legend/caption. Numeric potencies in nM (µM→nM ×1000, pM→nM ÷1000); Dmax/% as a percent. If activity is given as SYMBOLS (+, ++, +++, ++++) or a WORD (active/weak/inactive) instead of a number, put that exact rating in "potency". Omit any key you can't read; [] if no activity results. No yields/masses/purities.
+"assay_columns": EVERY activity/result column of the table, in left-to-right order — one entry each. Skip the compound-number column and any structure column. Give each column's exact header text, its unit if the values are numbers (µM/nM/pM/% else ''), and, if a key/legend defines that column's symbols (e.g. "+++ EC50 < 0.1 µM; ++ 0.1–0.5; + 0.5–1; – > 1"), copy it into "legend". For a dose–response graph with no table, still list the assay(s) shown (e.g. one column "IC50"). [] if no activity results.
+"rows": one per compound; "cells" = its value in EACH assay column, in the SAME ORDER as assay_columns, EXACTLY as shown — a number, a +/++/+++/– rating, a word, or "nd" if not determined / blank. Read graph values off the curves/legend/caption. [] if no activity results.
 "boxes": for each NUMBERED COMPOUND whose chemical STRUCTURE is drawn on this page, a tight bounding box around the whole drawn structure as [x,y,w,h] fractions of the page (0..1, origin top-left). [] if no structures are drawn.
 No text outside the JSON.`;
     const r=await state.sample.json(prompt,{images:[blob],modelTier:"quick",signal:ctl.signal});
     if(!r||typeof r!=="object") return {keep:false};
     const type=r.type||"other"; const exRaw=(Array.isArray(r.example_numbers)?r.example_numbers:[]).map(x=>String(x));
     const ex=exRaw.map(x=>cmpdKey(x));
-    const rows=(Array.isArray(r.rows)?r.rows:[]).map(row=>({ id:String(row.id!=null?row.id:""), data:cleanAssay(row) }))
-      .filter(x=>x.id && Object.keys(x.data).length);
+    const acols=(Array.isArray(r.assay_columns)?r.assay_columns:[])
+      .map(c=>({name:String(c&&c.name!=null?c.name:"").trim(), unit:String(c&&c.unit!=null?c.unit:"").trim(), legend:String(c&&c.legend!=null?c.legend:"").trim()}))
+      .filter(c=>c.name);
+    let rows, labels={}, legends=[];
+    if(acols.length){ const got=ingestAssayColumns(acols, Array.isArray(r.rows)?r.rows:[]); rows=got.rows; labels=got.labels; legends=got.legends; }
+    else {  // fallback: older inline-key schema (dc50_nm/…/potency) + single legend string
+      rows=(Array.isArray(r.rows)?r.rows:[]).map(row=>({id:String(row.id!=null?row.id:""), data:cleanAssay(row)})).filter(x=>x.id && Object.keys(x.data).length);
+      const lg=(typeof r.legend==="string"&&r.legend.trim())?r.legend.trim().slice(0,200):""; if(lg) legends=[lg];
+    }
     const boxes=(Array.isArray(r.boxes)?r.boxes:[]).map(bx=>({ id:String(bx.id!=null?bx.id:""), box:Array.isArray(bx.box)?bx.box.map(Number):null }))
       .filter(bx=>bx.id && bx.box && bx.box.length===4 && bx.box.every(v=>v>=0&&v<=1));
-    const legend=(typeof r.legend==="string"&&r.legend.trim())?r.legend.trim().slice(0,200):"";
-    return {type, examples:ex, examplesRaw:exRaw, hasData:!!r.has_activity_data, legend, rows, boxes, page:p};
+    return {type, examples:ex, examplesRaw:exRaw, hasData:!!r.has_activity_data, legends, labels, rows, boxes, page:p};
   }catch(e){ if(e&&e.code==="cancelled") throw e; return {keep:false}; }
 }
 // Merge Claude-read result rows into the compound set (fill gaps; never overwrite existing values).
@@ -2348,7 +2408,8 @@ async function buildScanDeck(pdf, pageTexts, opts){
     Progress.set(label, 0, `0 / ${pages.length} pages`);
     const vv=await mapPool(pages, 5, p=>senseCheckPage(pdf,p,ctl),
       d=>Progress.set(label, d/pages.length, `${d} / ${pages.length} pages`));
-    vv.forEach(v=>{ if(v){ verdicts.push(v); if(v.page)readPages.add(v.page); } });
+    vv.forEach(v=>{ if(v){ verdicts.push(v); if(v.page)readPages.add(v.page);
+      if(v.labels) Object.assign(state.assayLabels, v.labels); } });   // register column labels before refresh
     const rr=[]; vv.forEach(v=>{ if(v&&v.rows) rr.push(...v.rows); });
     const n=mergeReadData(rr); if(n){ nRead+=n; try{ refreshAll(); }catch(e){} dataKeys=dataBearingKeys(); }
   };
@@ -2442,23 +2503,26 @@ async function buildScanDeck(pdf, pageTexts, opts){
 
   const pptx=new PptxGenJS(); pptx.defineLayout({name:"DL",width:10,height:7.5}); pptx.layout="DL";
   pptx.author="Degrader Lens"; pptx.title=(state.pdfName||"patent")+" — compounds + data";
-  const colWfor=w=>{ const idw=Math.min(1.2,w*0.2), lnk=Math.min(0.7,w*0.12); return [idw, ...cols.map(()=> (w-idw-lnk)/Math.max(1,cols.length)), lnk]; };
+  // show the Linker column only when it means something (a degrader with a measured linker length)
+  const showLinker = present.some(c=>c.desc&&c.desc.linker_len!=null);
+  const colWfor=w=>{ const idw=Math.min(1.2,w*0.2), lnk=showLinker?Math.min(0.7,w*0.12):0;
+    return [idw, ...cols.map(()=> (w-idw-lnk)/Math.max(1,cols.length)), ...(showLinker?[lnk]:[])]; };
   const masterRows=(cs,hiKey,max)=>{ cs=cs.slice(0,max||24);
-    const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),{text:"Linker",options:{bold:true,fill:"EEF0F4"}}];
+    const head=[{text:"Cmpd",options:{bold:true,fill:"EEF0F4"}},...colHdr.map(h=>({text:h,options:{bold:true,fill:"EEF0F4"}})),...(showLinker?[{text:"Linker",options:{bold:true,fill:"EEF0F4"}}]:[])];
     const rows=[head];
     cs.forEach(c=>{ const o=(hiKey&&cmpdKey(c.id)===hiKey)?{fill:"FDEEC8"}:{};
-      rows.push([ {text:String(c.id),options:Object.assign({bold:true},o)}, ...cols.map(k=>({text:fmtCell(c,k),options:o})), {text:(c.desc&&c.desc.linker_len!=null?String(c.desc.linker_len):"–"),options:o} ]); });
+      rows.push([ {text:String(c.id),options:Object.assign({bold:true},o)}, ...cols.map(k=>({text:fmtCell(c,k),options:o})), ...(showLinker?[{text:(c.desc&&c.desc.linker_len!=null?String(c.desc.linker_len):"–"),options:o}]:[]) ]); });
     return rows; };
 
   // activity legend(s) Claude read off the pages (e.g. "+++ = IC50 < 10 nM") — surfaced so a qualitative
   // potency column is interpretable.
-  const legends=[...new Set(verdicts.map(v=>v&&v.legend).filter(Boolean))].slice(0,3);
+  const legends=[...new Set(verdicts.flatMap(v=>v&&Array.isArray(v.legends)?v.legends:[]))].slice(0,6);
   const legendLine=legends.join("   •   ");
   // slide 1: master data table of every compound with data
   { const s0=pptx.addSlide();
     s0.addText(`${esc(state.pdfName||"Patent")} — ${present.length} compound(s) with biological data`,{x:0.3,y:0.2,w:9.4,h:0.5,fontSize:16,bold:true,color:"1A222C"});
     s0.addTable(masterRows(present,null,28),{x:0.3,y:0.85,w:9.4,colW:colWfor(9.4),fontSize:10,border:{pt:0.5,color:"DDDDDD"},valign:"middle",autoPage:true,autoPageRepeatHeader:true});
-    if(legendLine) s0.addText("Key: "+legendLine,{x:0.3,y:7.0,w:9.4,h:0.35,fontSize:9,italic:true,color:"555555"});
+    if(legends.length) s0.addText("Key — "+legends.join("\n"),{x:0.3,y:6.55,w:9.4,h:0.9,fontSize:8,italic:true,color:"555555",valign:"top"});
   }
   // one slide per compound: cropped structure (left) + data (right). Master table on each slide while
   // it comfortably fits; otherwise this compound's own row.

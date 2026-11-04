@@ -53,11 +53,15 @@ Everything runs in the browser. Structures are parsed, depicted and analysed wit
   data-bearing compound's structure** out of its page using those boxes (a small pad covers a slightly-
   off box; aspect ratio preserved, no squishing). A compound that has data but whose structure couldn't
   be located is still included with its data and a "structure not located" note. **Activity is read in
-  whatever form the patent uses:** numeric potencies (DC₅₀/IC₅₀/EC₅₀/Dmax etc.), **qualitative ratings**
-  (a `+`/`++`/`+++` table or words like active/inactive — stored as a **Potency** column, charted as an
-  ordered category), and **IC₅₀/EC₅₀ values read off dose–response graphs** and their legends/captions.
-  When the patent defines what its symbols mean (e.g. "+++ = IC₅₀ < 10 nM"), that **key is captured and
-  printed** on the summary slide and in the status. The read-off values are
+  whatever form the patent uses, one column per assay.** Claude reads the results table's actual columns,
+  so a page with **several qualitative assays side by side** (e.g. a tau patent's ThT 2N4R EC₅₀, ThT PHF
+  EC₅₀ and % seeding-inhibition, each rated `+`/`++`/`+++`/`–` on its own scale) becomes **separate
+  columns**, not one collapsed rating. It handles numeric potencies (DC₅₀/IC₅₀/EC₅₀/Dmax…, converted to
+  nM), `+`/`++`/`+++`/`–` symbol ratings and word grades (ordered `–` < `+` < `++` < `+++` in charts),
+  and IC₅₀/EC₅₀ **read off dose–response graphs**; `nd`/blank is treated as not-determined (no value),
+  `–` as the weakest bin. Each column's **legend** (e.g. "+++ EC₅₀ < 0.1 µM; … – > 1 µM") is captured and
+  printed on the summary slide and in the status, so the ratings are interpretable. (The Linker column is
+  shown only for degraders that have a measured linker length.) The read-off values are
   also merged into the app's Table, so ticking only the deck box (no separate full structure-read) still
   fills in image-only data. The reading is **scoped so it stays fast on a full patent**: Claude reads the
   (few) **results-table pages first** — detection is lenient, so a table that names the assay only in its
